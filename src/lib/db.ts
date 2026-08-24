@@ -99,6 +99,15 @@ export const db = {
     await LocalAdapter.persist(schema);
   },
 
+  /** Синхронный сброс кэша — для beforeunload (прерванная Flow-сессия не должна теряться). */
+  flushSync(): void {
+    try {
+      localStorage.setItem(DB_KEY, JSON.stringify(schema));
+    } catch {
+      /* ignore */
+    }
+  },
+
   /* ---------- users ---------- */
   findUserByEmail(email: string): User | undefined {
     return schema.users.find((u) => u.email.toLowerCase() === email.toLowerCase());

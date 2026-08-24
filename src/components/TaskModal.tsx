@@ -3,8 +3,9 @@ import { I, iconOf } from "./icons";
 import { Field, Modal, Seg } from "./ui";
 import { useApp } from "../state/store";
 import { COLOR_NAMES, TASK_COLORS, TASK_ICONS } from "../lib/palette";
+import { RECURRENCE_PRESETS } from "../features/timeline/recurrence";
 import { clamp, fmtDur, hmToMin, minToHM, snap, todayKey } from "../lib/time";
-import type { EnergyLevel, Task, TaskColor } from "../lib/types";
+import type { EnergyLevel, Task, TaskColor, TaskTemplate } from "../lib/types";
 import { DAY_END, DAY_START } from "../lib/time";
 
 export interface TaskDraft {
@@ -40,12 +41,14 @@ export default function TaskModal({
   const [tagInput, setTagInput] = useState("");
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [armed, setArmed] = useState(false);
+  const [recurrence, setRecurrence] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setErrs({});
     setArmed(false);
     setTagInput("");
+    setRecurrence(task?.recurrenceRule ?? "");
     if (task) {
       setTitle(task.title);
       setDescription(task.description);
@@ -92,6 +95,35 @@ export default function TaskModal({
     return t && !base.includes(t) && base.length < 5 ? [...base, t] : base;
   };
 
+  /* ---------- шаблоны ---------- */
+  const applyTemplate = (t: TaskTemplate) => {
+    setTitle(t.title);
+    setIcon(t.icon);
+    setColor(t.color);
+    setEnergy(t.energy);
+    setTags(t.tags);
+    const s = t.timeHint ? hmToMin(t.timeHint) : start;
+    setStart(s);
+    setEnd(clamp(s + t.durationMin, s + 15, DAY_END));
+  };
+
+  const saveTemplate = () => {
+    if (title.trim().length < 2) {
+      setErrs({ title: "Название — минимум 2 символа" });
+      return;
+    }
+    app.addTemplate({
+      title: title.trim(),
+      icon,
+      color,
+      durationMin: end - start,
+      energy,
+      tags: withPendingTag(tags),
+      timeHint: minToHM(start),
+    });
+    app.toast("success", `Шаблон «${title.trim()}» сохранён`);
+  };
+
   const valid = useMemo(() => {
     const e: Record<string, string> = {};
     if (title.trim().length < 2) e.title = "Название — минимум 2 символа";
@@ -113,6 +145,7 @@ export default function TaskModal({
       icon,
       energy,
       tags: withPendingTag(tags),
+      recurrenceRule: recurrence || undefined,
     };
     if (task) {
       app.updateTask(task.id, payload);
@@ -130,6 +163,25 @@ export default function TaskModal({
         {task?.source === "gcal" && (
           <div className="flex items-center gap-2.5 rounded-lg border border-ind-400/25 bg-ind-400/8 px-3 py-2 text-[12px] font-semibold text-ind-400">
             <I n="cloud" size={14} /> Импортировано из Google Calendar — изменения вернутся при синхронизации
+          </div>
+        )}
+
+        {!task && app.templates.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-mist-500">
+              <I n="layers" size={11} /> Шаблоны
+            </span>
+            {app.templates.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => applyTemplate(t)}
+                className="chip cursor-pointer transition hover:!border-vio-400/45 hover:!bg-vio-400/12 hover:!text-vio-300"
+                title={`${t.title} · ${fmtDur(t.durationMin)} · ${t.timeHint ?? ""}`}
+              >
+                <I n={iconOf(t.icon, "target")} size={10} /> {t.title}
+              </button>
+            ))}
           </div>
         )}
 
@@ -178,6 +230,28 @@ export default function TaskModal({
             </button>
           ))}
         </div>
+
+        <Field label="Повторение" hint={recurrence ? "Экземпляры на 7 дней вперёд появятся в таймлайне автоматически" : undefined}>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setRecurrence("")}
+              className={`chip cursor-pointer transition ${!recurrence ? "!border-aqua-400/50 !bg-aqua-400/12 !text-aqua-300" : "hover:!border-white/20"}`}
+            >
+              Не повторять
+            </button>
+            {RECURRENCE_PRESETS.map((p) => (
+              <button
+                key={p.rule}
+                type="button"
+                onClick={() => setRecurrence(p.rule)}
+                className={`chip cursor-pointer transition ${recurrence === p.rule ? "!border-vio-400/50 !bg-vio-400/14 !text-vio-300" : "hover:!border-white/20"}`}
+              >
+                <I n="refresh" size={10} /> {p.label}
+              </button>
+            ))}
+          </div>
+        </Field>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Цвет">
@@ -278,6 +352,11 @@ export default function TaskModal({
                 <I n="trash" size={14} /> Удалить
               </button>
             )
+          )}
+          {!task && (
+            <button className="btn btn-ghost !text-[12px]" onClick={saveTemplate} title="Сохранить как шаблон для быстрого создания">
+              <I n="layers" size={13} /> В шаблоны
+            </button>
           )}
           <div className="ml-auto flex gap-2.5">
             <button className="btn btn-ghost" onClick={onClose}>Отмена</button>

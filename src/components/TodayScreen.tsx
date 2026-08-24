@@ -5,6 +5,7 @@ import { useApp } from "../state/store";
 import { resolveColors } from "../lib/palette";
 import { bestSlots, energySeries, restWindows } from "../lib/rhythm";
 import SuggestionBanner from "../features/suggestions/SuggestionBanner";
+import { setFlowLink } from "../features/flow/flowLink";
 import { useHotkeys } from "../shared/hooks/useHotkeys";
 import {
   DAY_END, DAY_START, addDaysKey, clamp, fmtDur, minToHM, nowMin, relDayLabel, snap, todayKey, weekdayIdx,
@@ -378,6 +379,18 @@ export default function TodayScreen({
                             <I n="edit" size={11} />
                           </button>
                           <button
+                            className="flex h-6 w-6 items-center justify-center rounded-md border border-vio-400/40 bg-ink-900/85 text-vio-300 hover:bg-vio-400/20"
+                            title="Фокус на задаче (Flow)"
+                            onPointerDown={(ev) => ev.stopPropagation()}
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              setFlowLink(t.id);
+                              app.setTab("flow");
+                            }}
+                          >
+                            <I n="play" size={11} />
+                          </button>
+                          <button
                             className={`flex h-6 items-center justify-center rounded-md border bg-ink-900/85 px-1 ${
                               armedDelete === t.id ? "border-bad/60 text-bad" : "w-6 border-white/15 text-mist-300 hover:bg-white/10"
                             }`}
@@ -641,7 +654,7 @@ function RoutinesCard({ date }: { date: string }) {
         <div className="mt-2.5 space-y-1.5">
           {rs.map((r) => (
             <div key={r.id} className="group flex items-center gap-2.5 rounded-lg border border-white/5 bg-white/[0.02] px-2.5 py-2 transition hover:bg-white/[0.045]">
-              <span style={{ color: TASK_COLORS[r.color] }}>
+              <span style={{ color: colors[r.color] }}>
                 <I n={iconOf(r.icon, "sun")} size={15} sw={2} />
               </span>
               <div className="min-w-0 flex-1">

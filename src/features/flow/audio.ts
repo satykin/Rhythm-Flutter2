@@ -295,6 +295,15 @@ class AmbientEngine {
     this.active().forEach((id) => this.stop(id));
   }
 
+  /** Плавное приглушение/восстановление всей шины (пауза → 0.2, перерыв → 0.8, mute → 0). */
+  duck(factor: number) {
+    if (!this.ctx || !this.master) return;
+    const t = this.ctx.currentTime;
+    this.master.gain.cancelScheduledValues(t);
+    this.master.gain.setValueAtTime(this.master.gain.value, t);
+    this.master.gain.linearRampToValueAtTime(0.9 * Math.max(0, Math.min(1, factor)), t + 0.6);
+  }
+
   /* ---------- колокольчики ---------- */
 
   private tone(freq: number, at: number, dur: number, vol: number) {
