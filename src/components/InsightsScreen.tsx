@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { I, IconName } from "./icons";
 import { useApp } from "../state/store";
-import { addDaysKey, todayKey, weekdayIdx, weekdayShort, plural } from "../lib/time";
+import { addDaysKey, todayKey, weekdayIdx, WD_SHORT, plural } from "../lib/time";
 
 const HOURS = Array.from({ length: 15 }, (_, i) => 7 + i); // 07..21
 
@@ -110,7 +110,7 @@ export default function InsightsScreen() {
                     }}
                   />
                 </div>
-                <span className={`text-[10px] font-extrabold ${i === todayWd ? "text-aqua-300" : "text-mist-500"}`}>{weekdayShort(["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-06", "2024-01-07"][i])}</span>
+                <span className={`text-[10px] font-extrabold ${i === todayWd ? "text-aqua-300" : "text-mist-500"}`}>{WD_SHORT[i]}</span>
               </div>
             ))}
           </div>

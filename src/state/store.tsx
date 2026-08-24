@@ -79,9 +79,10 @@ const AppCtx = createContext<Ctx | null>(null);
 
 const SYNC_KEY = "rhythm.syncstate.v1";
 
-function loadSyncState(): SyncState {
+/* Состояние синхронизации хранится per-user: аккаунты в одном браузере не делят его. */
+function loadSyncState(userId: string): SyncState {
   try {
-    const raw = localStorage.getItem(SYNC_KEY);
+    const raw = localStorage.getItem(`${SYNC_KEY}:${userId}`);
     if (raw) return { ...initial.sync, ...JSON.parse(raw) };
   } catch { /* ignore */ }
   return initial.sync;
@@ -116,6 +117,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setState((s) => ({ ...s, toasts: s.toasts.filter((t) => t.id !== id) }));
   }, []);
 
+  const persistSync = useCallback((sync: SyncState) => {
+    const userId = stateRef.current.user?.id;
+    if (!userId) return;
+    try { localStorage.setItem(`${SYNC_KEY}:${userId}`, JSON.stringify({ ...sync, syncing: false })); } catch { /* ignore */ }
+  }, []);
+
   /* ---------- boot ---------- */
   useEffect(() => {
     (async () => {
@@ -124,32 +131,32 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const user = sid ? db.get().users.find((u) => u.id === sid) ?? null : null;
       if (user) {
         if (db.tasksOf(user.id).length === 0) {
-          const seeded = seedFor(user);
-          seeded.tasks.forEach((t) => db.insertTask(t));
-          seeded.routines.forEach((r) => db.insertRoutine(r));
-          seeded.moods.forEach((m) => db.insertMood(m));
+          seedInto(user);
           await db.commit();
         }
         refreshFromDb(user.id);
-        patch({ user, sync: { ...loadSyncState(), syncing: false } });
+        patch({ user, sync: { ...loadSyncState(user.id), syncing: false } });
       }
       patch({ booted: true });
     })();
-  }, [patch, refreshFromDb]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* ---------- auth ---------- */
+  const seedInto = useCallback((user: User) => {
+    const seeded = seedFor(user);
+    seeded.tasks.forEach((t) => db.insertTask(t));
+    seeded.routines.forEach((r) => db.insertRoutine(r));
+    seeded.moods.forEach((m) => db.insertMood(m));
+  }, []);
+
   const enterAs = useCallback(async (user: User, isNew: boolean) => {
-    if (isNew) {
-      const seeded = seedFor(user);
-      seeded.tasks.forEach((t) => db.insertTask(t));
-      seeded.routines.forEach((r) => db.insertRoutine(r));
-      seeded.moods.forEach((m) => db.insertMood(m));
-    }
+    if (isNew) seedInto(user);
     sessionStore.write(user.id);
     await db.commit();
     refreshFromDb(user.id);
-    patch({ user, tab: "today", sync: { ...loadSyncState(), syncing: false } });
-  }, [patch, refreshFromDb]);
+    patch({ user, tab: "today", sync: { ...loadSyncState(user.id), syncing: false } });
+  }, [patch, refreshFromDb, seedInto]);
 
   const signUp = useCallback(async (name: string, email: string, pass: string) => {
     await new Promise((r) => setTimeout(r, 700));
@@ -168,15 +175,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const user = db.findUserByEmail(email);
     if (!user) return "Аккаунт не найден — создайте новый";
     if (user.provider === "email" && user.passHash !== demoHash(pass)) return "Неверный пароль";
-    if (db.tasksOf(user.id).length === 0) {
-      const seeded = seedFor(user);
-      seeded.tasks.forEach((t) => db.insertTask(t));
-      seeded.routines.forEach((r) => db.insertRoutine(r));
-      seeded.moods.forEach((m) => db.insertMood(m));
-    }
+    if (db.tasksOf(user.id).length === 0) seedInto(user);
     await enterAs(user, false);
     return null;
-  }, [enterAs]);
+  }, [enterAs, seedInto]);
 
   const signInWith = useCallback(async (provider: "google" | "apple") => {
     await new Promise((r) => setTimeout(r, 1000));
@@ -197,7 +199,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(() => {
     sessionStore.clear();
-    patch({ user: null, tasks: [], routines: [], moods: [], tab: "today", syncLog: [] });
+    patch({ user: null, tasks: [], routines: [], moods: [], tab: "today", sync: initial.sync, syncLog: [] });
   }, [patch]);
 
   const updateUser = useCallback((p: Partial<User>) => {
@@ -243,11 +245,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [refreshFromDb]);
 
   const removeTask = useCallback((id: string) => {
-    const u = stateRef.current.user!;
+    const st = stateRef.current;
+    const u = st.user!;
+    const t = db.tasksOf(u.id).find((x) => x.id === id);
     db.removeTask(id);
+    /* Tombstone: удалённое событие календаря не должно вернуться при следующем pull. */
+    if (t?.externalId) {
+      const removed = st.sync.removedExternalIds ?? [];
+      if (!removed.includes(t.externalId)) {
+        const sync = { ...st.sync, removedExternalIds: [...removed, t.externalId] };
+        patch({ sync });
+        persistSync(sync);
+      }
+    }
     void db.commit();
     refreshFromDb(u.id);
-  }, [refreshFromDb]);
+  }, [patch, persistSync, refreshFromDb]);
 
   const setTaskStatus = useCallback((id: string, status: TaskStatus) => {
     updateTask(id, { status });
@@ -259,8 +272,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const dayTasks = db.tasksOf(u.id).filter((t) => t.date === today && t.status !== "skipped");
     let start = clamp(hmToMin(r.timeHint), 6 * 60, 23 * 60 - r.durationMin);
     const overlaps = (s: number, e: number) => dayTasks.some((t) => s < t.endMin && e > t.startMin);
+    const maxStart = 23 * 60 - r.durationMin;
     let guard = 0;
-    while (overlaps(start, start + r.durationMin) && guard++ < 60) start += 15;
+    while (overlaps(start, start + r.durationMin) && guard++ < 60) {
+      start += 15;
+      if (start > maxStart) return null; // день плотный — свободного окна до конца дня нет
+    }
     if (overlaps(start, start + r.durationMin)) return null;
     addTask({
       title: r.title, description: "", date: today,
@@ -285,10 +302,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [refreshFromDb]);
 
   /* ---------- calendar sync ---------- */
-  const persistSync = useCallback((sync: SyncState) => {
-    try { localStorage.setItem(SYNC_KEY, JSON.stringify({ ...sync, syncing: false })); } catch { /* ignore */ }
-  }, []);
-
   const log = useCallback((text: string, kind: SyncLogLine["kind"] = "info") => {
     setState((s) => ({ ...s, syncLog: [...s.syncLog.slice(-30), { at: Date.now(), text, kind }] }));
   }, []);
@@ -304,9 +317,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       /* pull */
       const events = await googleProvider.pull();
       const existing = new Set(db.tasksOf(u.id).map((t) => t.externalId).filter(Boolean));
+      const removed = new Set(st.sync.removedExternalIds ?? []);
       let pulled = 0;
       for (const ev of events) {
-        if (existing.has(ev.externalId)) continue;
+        if (existing.has(ev.externalId) || removed.has(ev.externalId)) continue;
         db.insertTask({
           id: uid(), userId: u.id, title: ev.title, description: "Импортировано из Google Calendar",
           date: ev.date, startMin: ev.startMin, endMin: ev.endMin,
@@ -385,14 +399,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const u = stateRef.current.user;
     if (!u) return;
     await db.wipeUserData(u.id);
-    const seeded = seedFor(u);
-    seeded.tasks.forEach((t) => db.insertTask(t));
-    seeded.routines.forEach((r) => db.insertRoutine(r));
-    seeded.moods.forEach((m) => db.insertMood(m));
+    seedInto(u);
     await db.commit();
     refreshFromDb(u.id);
     toast("success", "Демо-данные пересозданы");
-  }, [refreshFromDb, toast]);
+  }, [refreshFromDb, seedInto, toast]);
 
   const value: Ctx = {
     ...state,

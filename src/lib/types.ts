@@ -87,6 +87,8 @@ export interface SyncState {
   autoSync: boolean;
   lastSyncAt?: number;
   syncing: boolean;
+  /** Tombstones: externalId удалённых событий — не ре-импортировать при pull. */
+  removedExternalIds?: string[];
 }
 
 export interface SyncLogLine {

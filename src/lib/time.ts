@@ -41,7 +41,7 @@ export const addDaysKey = (key: string, days: number) => {
 /** 0=Пн … 6=Вс */
 export const weekdayIdx = (key: string) => (keyToDate(key).getDay() + 6) % 7;
 
-const WD_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+export const WD_SHORT = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"] as const;
 const WD_FULL = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
 const MONTH_GEN = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
 

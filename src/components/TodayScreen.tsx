@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { I, MoodFace } from "./icons";
+import { I, iconOf, MoodFace } from "./icons";
 import { Bar, EmptyState, Ring } from "./ui";
 import { useApp } from "../state/store";
 import { TASK_COLORS } from "../lib/palette";
@@ -283,7 +283,7 @@ export default function TodayScreen({
                       <div className={`flex h-full flex-col overflow-hidden px-2.5 ${compact ? "justify-center" : "py-1.5"}`}>
                         <div className="flex items-center gap-1.5">
                           <span style={{ color: c }}>
-                            <I n={t.icon as never} size={compact ? 12 : 13} sw={2} />
+                            <I n={iconOf(t.icon, "target")} size={compact ? 12 : 13} sw={2} />
                           </span>
                           <span className={`min-w-0 flex-1 truncate text-[12.5px] font-bold leading-tight text-mist-50 ${isDone ? "line-through" : ""}`}>
                             {t.title}
@@ -455,13 +455,19 @@ function NowCard({
   const total = dayTasks.length;
   const pct = total ? done / total : 0;
 
+  const fmtLeft = (leftSec: number) => {
+    const h = Math.floor(leftSec / 3600);
+    const m = Math.floor((leftSec % 3600) / 60);
+    const s = leftSec % 60;
+    return h > 0
+      ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+      : `${m}:${String(s).padStart(2, "0")}`;
+  };
   let countdown = "";
   if (current) {
-    const left = Math.max(0, current.endMin * 60 - nowSec);
-    countdown = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+    countdown = fmtLeft(Math.max(0, current.endMin * 60 - nowSec));
   } else if (next) {
-    const left = Math.max(0, next.startMin * 60 - nowSec);
-    countdown = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+    countdown = fmtLeft(Math.max(0, next.startMin * 60 - nowSec));
   }
 
   const active = current ?? next;
@@ -488,7 +494,7 @@ function NowCard({
           </div>
           <div className="mt-2 flex items-start gap-2.5">
             <span className="mt-0.5" style={{ color: c }}>
-              <I n={active.icon as never} size={17} sw={2} />
+              <I n={iconOf(active.icon, "target")} size={17} sw={2} />
             </span>
             <div className="min-w-0">
               <div className="truncate text-[14px] font-bold text-mist-50">{active.title}</div>
@@ -617,7 +623,7 @@ function RoutinesCard({ date }: { date: string }) {
           {rs.map((r) => (
             <div key={r.id} className="group flex items-center gap-2.5 rounded-lg border border-white/5 bg-white/[0.02] px-2.5 py-2 transition hover:bg-white/[0.045]">
               <span style={{ color: TASK_COLORS[r.color] }}>
-                <I n={r.icon as never} size={15} sw={2} />
+                <I n={iconOf(r.icon, "sun")} size={15} sw={2} />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[12.5px] font-bold text-mist-100">{r.title}</div>

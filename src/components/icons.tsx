@@ -165,3 +165,12 @@ export function AppleMark({ size = 17 }: { size?: number }) {
     </svg>
   );
 }
+
+/**
+ * Безопасное сужение строки до IconName: неизвестный/пустой id
+ * (например, из старых данных или внешнего импорта) не роняет рендер,
+ * а подставляет fallback-иконку.
+ */
+export function iconOf(id: string | null | undefined, fallback: IconName = "spark"): IconName {
+  return id && id in P ? (id as IconName) : fallback;
+}

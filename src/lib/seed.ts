@@ -11,7 +11,6 @@ const rnd = () => {
   s = (s * 1664525 + 1013904223) % 4294967296;
   return s / 4294967296;
 };
-const pick = <T,>(arr: T[]) => arr[Math.floor(rnd() * arr.length)];
 
 interface Tpl {
   title: string;
@@ -112,8 +111,4 @@ export function seedFor(user: User): { tasks: Task[]; routines: Routine[]; moods
   return { tasks, routines, moods };
 }
 
-export const randomInsight = () => pick([
-  "В дни с прогулкой ты на 38% продуктивнее",
-  "Пик фокуса — с 10:00 до 12:00",
-  "После 7+ часов сна задачи идут на 25% быстрее",
-]);
+

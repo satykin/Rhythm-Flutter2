@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { I } from "./icons";
+import { I, iconOf } from "./icons";
 import { Field, Modal, Seg } from "./ui";
 import { useApp } from "../state/store";
 import { COLOR_NAMES, TASK_COLORS, TASK_ICONS } from "../lib/palette";
@@ -78,10 +78,18 @@ export default function TaskModal({
     setEnd(clamp(s + Math.max(15, dur), s + 15, DAY_END));
   };
 
+  const normalizeTag = (raw: string) => raw.trim().replace(/^#/, "").toLowerCase();
+
   const addTag = () => {
-    const t = tagInput.trim().replace(/^#/, "").toLowerCase();
+    const t = normalizeTag(tagInput);
     if (t && !tags.includes(t) && tags.length < 5) setTags([...tags, t]);
     setTagInput("");
+  };
+
+  /** Тег, введённый в поле, но не подтверждённый Enter, не должен теряться при сохранении. */
+  const withPendingTag = (base: string[]) => {
+    const t = normalizeTag(tagInput);
+    return t && !base.includes(t) && base.length < 5 ? [...base, t] : base;
   };
 
   const valid = useMemo(() => {
@@ -104,7 +112,7 @@ export default function TaskModal({
       color,
       icon,
       energy,
-      tags,
+      tags: withPendingTag(tags),
     };
     if (task) {
       app.updateTask(task.id, payload);
@@ -215,7 +223,7 @@ export default function TaskModal({
                     : "border-white/7 bg-white/[0.02] text-mist-400 hover:border-white/15 hover:text-mist-200"
                 }`}
               >
-                <I n={ic.id as never} size={16} />
+                <I n={iconOf(ic.id, "target")} size={16} />
               </button>
             ))}
           </div>
