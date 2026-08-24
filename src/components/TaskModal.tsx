@@ -43,6 +43,16 @@ export default function TaskModal({
   const [armed, setArmed] = useState(false);
   const [recurrence, setRecurrence] = useState("");
 
+  /* §5 инлайн-подсказки: оценка длительности + лучшее время (по тегам/энергии) */
+  const smartDuration = useMemo(
+    () => (tags.length ? durationHint(app.tasks, tags) : null),
+    [app.tasks, tags]
+  );
+  const smartTime = useMemo(
+    () => (tags.length || true ? bestTimeHint(app.tasks, { tags, energy }) : null),
+    [app.tasks, tags, energy]
+  );
+
   useEffect(() => {
     if (!open) return;
     setErrs({});
@@ -216,6 +226,36 @@ export default function TaskModal({
             <input type="time" className="input" value={minToHM(end)} onChange={(e) => e.target.value && setEnd(clamp(hmToMin(e.target.value), start + 15, DAY_END))} />
           </Field>
         </div>
+
+        {/* §5 инлайн: умные подсказки (длительность + лучшее время) */}
+        {!task && (smartDuration || smartTime !== null) && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-aqua-400/20 bg-aqua-400/[0.05] px-3 py-2">
+            <I n="spark" size={13} className="text-aqua-300" />
+            {smartDuration && (
+              <button
+                type="button"
+                onClick={() => setEnd(clamp(start + smartDuration, start + 15, DAY_END))}
+                className="chip cursor-pointer !border-aqua-400/30 !bg-aqua-400/10 !text-aqua-300 transition hover:!bg-aqua-400/20"
+                title="Подставить оценку"
+              >
+                ≈ {fmtDur(smartDuration)} (по похожим)
+              </button>
+            )}
+            {smartTime !== null && (
+              <button
+                type="button"
+                onClick={() => {
+                  setStart(smartTime);
+                  setEnd(clamp(smartTime + dur, smartTime + 15, DAY_END));
+                }}
+                className="chip cursor-pointer !border-aqua-400/30 !bg-aqua-400/10 !text-aqua-300 transition hover:!bg-aqua-400/20"
+                title="Подставить лучшее время"
+              >
+                <I n="clock" size={10} /> обычно в {minToHM(smartTime)}
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="mr-1 text-[11px] font-bold uppercase tracking-wider text-mist-500">Длительность</span>

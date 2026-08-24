@@ -74,7 +74,7 @@ function Body() {
     <>
       <div className="rhythm-bg" />
       <Shell onNewTask={() => openNew()} onHelp={() => setHelpOpen(true)} helpOpen={helpOpen} onCloseHelp={() => setHelpOpen(false)}>
-        {app.tab === "today" && <TodayScreen onEdit={openEdit} onNewAt={(date, startMin) => openNew({ date, startMin })} />}
+        {app.tab === "today" && <TodayScreen onEdit={openEdit} onNewAt={(date, startMin, endMin) => openNew({ date, startMin, endMin })} />}
         {app.tab === "flow" && <FlowScreen />}
         {app.tab === "rhythm" && <RhythmScreen onPlanSlot={(start, end) => openNew({ date: todayKey(), startMin: start, endMin: end })} />}
         {app.tab === "journal" && <JournalScreen />}

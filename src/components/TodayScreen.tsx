@@ -4,7 +4,7 @@ import { Bar, EmptyState, Ring } from "./ui";
 import { useApp } from "../state/store";
 import { resolveColors } from "../lib/palette";
 import { bestSlots, energySeries, restWindows } from "../lib/rhythm";
-import SuggestionBanner from "../features/suggestions/SuggestionBanner";
+import SuggestionSurface from "../features/suggestions/presentation/SuggestionSurface";
 import { setFlowLink } from "../features/flow/flowLink";
 import { useHotkeys } from "../shared/hooks/useHotkeys";
 import {
@@ -51,7 +51,7 @@ export default function TodayScreen({
   onNewAt,
 }: {
   onEdit: (t: Task) => void;
-  onNewAt: (date: string, startMin: number) => void;
+  onNewAt: (date: string, startMin: number, endMin?: number) => void;
 }) {
   const app = useApp();
   const [date, setDate] = useState(todayKey());
@@ -173,7 +173,7 @@ export default function TodayScreen({
 
   return (
     <div className="mx-auto max-w-[1180px] space-y-5">
-      {isToday && <SuggestionBanner onPlan={(s) => onNewAt(date, s)} />}
+      {isToday && <SuggestionSurface onPlan={(s, e) => onNewAt(date, s, e)} />}
       <div className="flex flex-col gap-5 xl:flex-row">
       {/* ============ TIMELINE ============ */}
       <section className="anim-rise card flex min-w-0 flex-1 flex-col overflow-hidden">

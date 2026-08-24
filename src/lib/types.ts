@@ -67,6 +67,8 @@ export interface Task {
   recurrenceRule?: string;
   /** для материализованных экземпляров повторяющейся задачи */
   parentTaskId?: string;
+  /** сколько раз задачу переносили — для §4.6 break_down */
+  movedCount?: number;
 }
 
 export interface Routine {
@@ -127,28 +129,64 @@ export interface FocusSession {
   sounds: string[];
 }
 
-/* ---------- Smart Suggestions ---------- */
+/* ---------- Smart Suggestions (спека v1.0, §8) ---------- */
 
-export type SuggestionType = "golden_time" | "reschedule" | "procrastination" | "new_task_time" | "rest_window";
-export type SuggestionStatus = "pending" | "accepted" | "dismissed" | "snoozed";
+export type SuggestionKind =
+  | "golden_hour"
+  | "best_time"
+  | "duration"
+  | "reschedule"
+  | "overload"
+  | "break_down"
+  | "briefing_am"
+  | "briefing_pm";
+
+export type SuggestionState = "created" | "shown" | "accepted" | "dismissed" | "snoozed" | "expired";
+
+export interface SuggestionContext {
+  taskId?: string;
+  date?: string;
+  startMin?: number;
+  endMin?: number;
+  proposedDate?: string;
+  proposedStartMin?: number;
+  subtasks?: { title: string; durationMin: number }[];
+  estimatedMin?: number;
+  scheduledMin?: number;
+}
 
 export interface Suggestion {
   id: string;
   userId: string;
-  type: SuggestionType;
+  kind: SuggestionKind;
   title: string;
-  detail: string;
-  context: {
-    taskId?: string;
-    date?: string;
-    startMin?: number;
-    endMin?: number;
-  };
-  status: SuggestionStatus;
+  body: string;
+  context: SuggestionContext;
+  priority: number;
+  state: SuggestionState;
+  shownAt?: number;
+  expiresAt?: number;
   snoozeUntil?: number;
-  /** ключ дедупликации (type + контекст) */
   dedupKey: string;
-  createdAt: string;
+  createdAt: number;
+}
+
+/** suggestion_feedback (§8) — обучение ранкера. */
+export interface SuggestionFeedback {
+  id: string;
+  userId: string;
+  suggestionId: string;
+  kind: SuggestionKind;
+  action: "accepted" | "dismissed" | "snoozed";
+  createdAt: number;
+}
+
+/** user_productivity_slots (§8) — агрегированные золотые слоты. */
+export interface ProductivitySlot {
+  userId: string;
+  slotIndex: number; // 0..47
+  score: number;
+  computedAt: number;
 }
 
 /* ---------- Task Templates ---------- */

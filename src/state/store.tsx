@@ -9,7 +9,10 @@ import { seedFor } from "../lib/seed";
 import { googleProvider } from "../lib/sync";
 import { clamp, demoHash, hmToMin, nowMin, todayKey, uid } from "../lib/time";
 import { parseRRule, occurrences } from "../features/timeline/recurrence";
-import { generateCandidates, reschedulePlan, productivityWindows } from "../features/suggestions/suggestionService";
+import { act } from "../features/suggestions/data/SuggestionRepository";
+import { reschedulePlan } from "../features/suggestions/domain/reschedule";
+import { productivityWindows } from "../features/suggestions/suggestionService";
+import { runScheduler } from "../features/suggestions/SuggestionScheduler";
 import { startScheduler, registerWorker } from "../features/notify/notify";
 import type {
   FocusSession, MoodLog, Routine, Suggestion, SyncLogLine, SyncState, TabId, Task, TaskStatus,
@@ -157,48 +160,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /* Подсказки: генерация кандидатов + дедупликация по ключу. */
-  const refreshSuggestions = useCallback((userId: string) => {
-    const today = todayKey();
-    /* вчерашние подсказки больше не актуальны */
-    for (const s of db.suggestionsOf(userId)) {
-      if (s.status === "pending" && s.createdAt.slice(0, 10) < today) {
-        db.updateSuggestion({ ...s, status: "dismissed" });
-      }
-    }
-    const cands = generateCandidates(db.tasksOf(userId));
-    const existing = db.suggestionsOf(userId);
-    for (const c of cands) {
-      const dup = existing.some(
-        (s) => s.dedupKey === c.dedupKey && (s.status === "pending" || s.status === "snoozed")
-      );
-      if (dup) continue;
-      db.insertSuggestion({
-        id: uid(), userId, type: c.type, title: c.title, detail: c.detail,
-        context: c.context, status: "pending", dedupKey: c.dedupKey,
-        createdAt: new Date().toISOString(),
-      });
-      existing.push({
-        id: "tmp", userId, type: c.type, title: c.title, detail: c.detail,
-        context: c.context, status: "pending", dedupKey: c.dedupKey, createdAt: "",
-      });
-    }
-  }, []);
-
   const refreshFromDb = useCallback((userId: string) => {
     materializeRecurrences(userId);
-    refreshSuggestions(userId);
-    const now = Date.now();
+    const { suggestions } = runScheduler(userId);
     patch({
       tasks: db.tasksOf(userId).sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin),
       routines: db.routinesOf(userId),
       moods: db.moodsOf(userId),
       templates: db.templatesOf(userId),
-      suggestions: db
-        .suggestionsOf(userId)
-        .filter((s) => s.status === "pending" || (s.status === "snoozed" && (s.snoozeUntil ?? 0) <= now)),
+      suggestions,
       focusSessions: db.focusSessionsOf(userId),
     });
-  }, [materializeRecurrences, patch, refreshSuggestions]);
+  }, [materializeRecurrences, patch]);
 
   const toast = useCallback((kind: Toast["kind"], text: string, actions?: ToastAction[]) => {
     const id = toastId.current++;
@@ -443,51 +416,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refreshFromDb(u.id);
   }, [refreshFromDb]);
 
-  /* ---------- suggestions ---------- */
+  /* ---------- suggestions (Smart Suggestions Engine, спека v1.0) ---------- */
   const pendingSuggestion = useCallback((): Suggestion | null => {
-    const list = stateRef.current.suggestions;
-    const now = Date.now();
-    const visible = list
-      .filter((s) => s.status === "pending" || (s.status === "snoozed" && (s.snoozeUntil ?? 0) <= now))
-      .sort((a, b) => (a.type === "reschedule" ? -1 : 1) - (b.type === "reschedule" ? -1 : 1));
-    return visible[0] ?? null;
+    return stateRef.current.suggestions[0] ?? null;
   }, []);
 
-  const setSuggestionStatus = useCallback((id: string, status: Suggestion["status"], snoozeUntil?: number) => {
+  const suggestionAct = useCallback((id: string, action: "accepted" | "dismissed" | "snoozed") => {
     const u = stateRef.current.user;
     if (!u) return;
-    const s = db.suggestionsOf(u.id).find((x) => x.id === id);
-    if (!s) return;
-    db.updateSuggestion({ ...s, status, snoozeUntil });
-    void db.commit();
+    act(u.id, id, action);
     refreshFromDb(u.id);
   }, [refreshFromDb]);
 
-  const acceptSuggestion = useCallback((id: string) => {
-    const s = db.suggestionsOf(stateRef.current.user!.id).find((x) => x.id === id);
-    if (!s) return;
-    setSuggestionStatus(id, "accepted");
-  }, [setSuggestionStatus]);
+  const acceptSuggestion = useCallback((id: string) => suggestionAct(id, "accepted"), [suggestionAct]);
 
-  const dismissSuggestion = useCallback((id: string) => {
-    setSuggestionStatus(id, "dismissed");
-  }, [setSuggestionStatus]);
+  const dismissSuggestion = useCallback((id: string) => suggestionAct(id, "dismissed"), [suggestionAct]);
 
   const snoozeSuggestion = useCallback((id: string) => {
-    setSuggestionStatus(id, "snoozed", Date.now() + 2 * 60 * 60 * 1000);
+    suggestionAct(id, "snoozed");
     toast("info", "Подсказка вернётся через 2 часа");
-  }, [setSuggestionStatus, toast]);
+  }, [suggestionAct, toast]);
 
   const applyReschedule = useCallback((): number => {
     const u = stateRef.current.user!;
     const tasks = db.tasksOf(u.id);
-    const plan = reschedulePlan(tasks, productivityWindows(tasks));
+    const plan = reschedulePlan(tasks, productivityWindows(tasks, db.focusSessionsOf(u.id)));
     for (const p of plan) {
       const t = tasks.find((x) => x.id === p.task.id);
       if (!t) continue;
       db.updateTask({
-        ...t, date: todayKey(), startMin: p.startMin, endMin: p.endMin,
-        status: "todo", updatedAt: new Date().toISOString(),
+        ...t, date: p.date, startMin: p.startMin, endMin: p.endMin,
+        status: "todo", movedCount: (t.movedCount ?? 0) + 1, updatedAt: new Date().toISOString(),
       });
     }
     if (plan.length) {

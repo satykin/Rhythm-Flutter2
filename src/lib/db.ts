@@ -9,7 +9,9 @@
  *   - db.*    ≈ async API с сетевой задержкой, как у HTTP-клиента
  * ============================================================ */
 
-import type { FocusSession, MoodLog, Routine, Suggestion, Task, TaskTemplate, User } from "./types";
+import type {
+  FocusSession, MoodLog, ProductivitySlot, Routine, Suggestion, SuggestionFeedback, Task, TaskTemplate, User,
+} from "./types";
 
 export interface Schema {
   version: number;
@@ -19,6 +21,8 @@ export interface Schema {
   mood_logs: MoodLog[];
   focus_sessions: FocusSession[];
   suggestions: Suggestion[];
+  suggestion_feedback: SuggestionFeedback[];
+  user_productivity_slots: ProductivitySlot[];
   task_templates: TaskTemplate[];
 }
 
@@ -54,6 +58,8 @@ function backfill(raw: Partial<Schema>): Schema {
     }),
     focus_sessions: raw.focus_sessions ?? [],
     suggestions: raw.suggestions ?? [],
+    suggestion_feedback: raw.suggestion_feedback ?? [],
+    user_productivity_slots: raw.user_productivity_slots ?? [],
     task_templates: raw.task_templates ?? [],
   };
 }
@@ -81,7 +87,7 @@ const LocalAdapter: StorageAdapter = {
 let schema: Schema = {
   version: SCHEMA_VERSION,
   users: [], tasks: [], routines: [], mood_logs: [],
-  focus_sessions: [], suggestions: [], task_templates: [],
+  focus_sessions: [], suggestions: [], suggestion_feedback: [], user_productivity_slots: [], task_templates: [],
 };
 
 export const db = {
@@ -174,6 +180,26 @@ export const db = {
     const i = schema.suggestions.findIndex((x) => x.id === s.id);
     if (i >= 0) schema.suggestions[i] = s;
   },
+  removeSuggestion(id: string) {
+    schema.suggestions = schema.suggestions.filter((s) => s.id !== id);
+  },
+
+  /* ---------- suggestion_feedback ---------- */
+  feedbackOf(userId: string): SuggestionFeedback[] {
+    return schema.suggestion_feedback.filter((f) => f.userId === userId);
+  },
+  insertFeedback(f: SuggestionFeedback) {
+    schema.suggestion_feedback.push(f);
+  },
+
+  /* ---------- user_productivity_slots ---------- */
+  slotsOf(userId: string): ProductivitySlot[] {
+    return schema.user_productivity_slots.filter((s) => s.userId === userId);
+  },
+  upsertSlots(userId: string, slots: ProductivitySlot[]) {
+    schema.user_productivity_slots = schema.user_productivity_slots.filter((s) => s.userId !== userId);
+    schema.user_productivity_slots.push(...slots);
+  },
 
   /* ---------- task_templates ---------- */
   templatesOf(userId: string): TaskTemplate[] {
@@ -193,6 +219,8 @@ export const db = {
     schema.routines = schema.routines.filter((r) => r.userId !== userId);
     schema.focus_sessions = schema.focus_sessions.filter((s) => s.userId !== userId);
     schema.suggestions = schema.suggestions.filter((s) => s.userId !== userId);
+    schema.suggestion_feedback = schema.suggestion_feedback.filter((f) => f.userId !== userId);
+    schema.user_productivity_slots = schema.user_productivity_slots.filter((s) => s.userId !== userId);
     schema.task_templates = schema.task_templates.filter((t) => t.userId !== userId);
     await this.commit();
   },
