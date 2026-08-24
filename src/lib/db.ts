@@ -2,13 +2,14 @@
  * Rhythm — слой данных (data layer)
  *
  * Архитектура повторяет будущую связку Supabase:
- *   - Schema  ≈ таблицы users / tasks / routines / mood_logs
+ *   - Schema  ≈ таблицы users / tasks / routines / mood_logs /
+ *               focus_sessions / suggestions / task_templates
  *   - Adapter ≈ клиент (сейчас LocalAdapter на localStorage,
  *               в проде — SupabaseAdapter с realtime-подписками)
  *   - db.*    ≈ async API с сетевой задержкой, как у HTTP-клиента
  * ============================================================ */
 
-import type { MoodLog, Routine, Task, User } from "./types";
+import type { FocusSession, MoodLog, Routine, Suggestion, Task, TaskTemplate, User } from "./types";
 
 export interface Schema {
   version: number;
@@ -16,6 +17,9 @@ export interface Schema {
   tasks: Task[];
   routines: Routine[];
   mood_logs: MoodLog[];
+  focus_sessions: FocusSession[];
+  suggestions: Suggestion[];
+  task_templates: TaskTemplate[];
 }
 
 export interface StorageAdapter {
@@ -28,6 +32,32 @@ const SCHEMA_VERSION = 1;
 
 const latency = (ms = 60) => new Promise<void>((r) => setTimeout(r, ms + Math.random() * 60));
 
+/** Мягкая миграция: добиваем отсутствующие коллекции и поля (схемы v1 без Этапа 2). */
+function backfill(raw: Partial<Schema>): Schema {
+  return {
+    version: SCHEMA_VERSION,
+    users: (raw.users ?? []).map((u) => {
+      const l = u as Partial<User>;
+      return {
+        ...u,
+        themePalette: l.themePalette ?? "default",
+        quietFrom: l.quietFrom ?? 22 * 60,
+        quietTo: l.quietTo ?? 8 * 60,
+        notifications: l.notifications ?? { enabled: false, taskReminder: true, focusTime: true, morningBriefing: true, eveningReview: true },
+      };
+    }),
+    tasks: raw.tasks ?? [],
+    routines: raw.routines ?? [],
+    mood_logs: (raw.mood_logs ?? []).map((m) => {
+      const l = m as Partial<MoodLog>;
+      return { ...m, tags: l.tags ?? [], linkedTaskIds: l.linkedTaskIds ?? [] };
+    }),
+    focus_sessions: raw.focus_sessions ?? [],
+    suggestions: raw.suggestions ?? [],
+    task_templates: raw.task_templates ?? [],
+  };
+}
+
 /** Локальный адаптер — аналог Hive из ТЗ (кэш первого слоя). */
 const LocalAdapter: StorageAdapter = {
   async load() {
@@ -35,9 +65,9 @@ const LocalAdapter: StorageAdapter = {
     try {
       const raw = localStorage.getItem(DB_KEY);
       if (!raw) return null;
-      const parsed = JSON.parse(raw) as Schema;
+      const parsed = JSON.parse(raw) as Partial<Schema>;
       if (parsed.version !== SCHEMA_VERSION) return null;
-      return parsed;
+      return backfill(parsed);
     } catch {
       return null;
     }
@@ -48,7 +78,11 @@ const LocalAdapter: StorageAdapter = {
   },
 };
 
-let schema: Schema = { version: SCHEMA_VERSION, users: [], tasks: [], routines: [], mood_logs: [] };
+let schema: Schema = {
+  version: SCHEMA_VERSION,
+  users: [], tasks: [], routines: [], mood_logs: [],
+  focus_sessions: [], suggestions: [], task_templates: [],
+};
 
 export const db = {
   async boot(): Promise<Schema> {
@@ -71,6 +105,10 @@ export const db = {
   },
   insertUser(u: User) {
     schema.users.push(u);
+  },
+  updateUser(u: User) {
+    const i = schema.users.findIndex((x) => x.id === u.id);
+    if (i >= 0) schema.users[i] = u;
   },
 
   /* ---------- tasks ---------- */
@@ -108,11 +146,45 @@ export const db = {
     if (i >= 0) schema.mood_logs[i] = m;
   },
 
+  /* ---------- focus_sessions ---------- */
+  focusSessionsOf(userId: string): FocusSession[] {
+    return schema.focus_sessions.filter((s) => s.userId === userId);
+  },
+  insertFocusSession(s: FocusSession) {
+    schema.focus_sessions.push(s);
+  },
+
+  /* ---------- suggestions ---------- */
+  suggestionsOf(userId: string): Suggestion[] {
+    return schema.suggestions.filter((s) => s.userId === userId);
+  },
+  insertSuggestion(s: Suggestion) {
+    schema.suggestions.push(s);
+  },
+  updateSuggestion(s: Suggestion) {
+    const i = schema.suggestions.findIndex((x) => x.id === s.id);
+    if (i >= 0) schema.suggestions[i] = s;
+  },
+
+  /* ---------- task_templates ---------- */
+  templatesOf(userId: string): TaskTemplate[] {
+    return schema.task_templates.filter((t) => t.userId === userId);
+  },
+  insertTemplate(t: TaskTemplate) {
+    schema.task_templates.push(t);
+  },
+  removeTemplate(id: string) {
+    schema.task_templates = schema.task_templates.filter((t) => t.id !== id);
+  },
+
   /* ---------- сервис ---------- */
   async wipeUserData(userId: string): Promise<void> {
     schema.tasks = schema.tasks.filter((t) => t.userId !== userId);
     schema.mood_logs = schema.mood_logs.filter((m) => m.userId !== userId);
     schema.routines = schema.routines.filter((r) => r.userId !== userId);
+    schema.focus_sessions = schema.focus_sessions.filter((s) => s.userId !== userId);
+    schema.suggestions = schema.suggestions.filter((s) => s.userId !== userId);
+    schema.task_templates = schema.task_templates.filter((t) => t.userId !== userId);
     await this.commit();
   },
 };

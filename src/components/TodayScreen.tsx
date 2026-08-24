@@ -2,8 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { I, iconOf, MoodFace } from "./icons";
 import { Bar, EmptyState, Ring } from "./ui";
 import { useApp } from "../state/store";
-import { TASK_COLORS } from "../lib/palette";
+import { resolveColors } from "../lib/palette";
 import { bestSlots, energySeries, restWindows } from "../lib/rhythm";
+import SuggestionBanner from "../features/suggestions/SuggestionBanner";
+import { useHotkeys } from "../shared/hooks/useHotkeys";
 import {
   DAY_END, DAY_START, addDaysKey, clamp, fmtDur, minToHM, nowMin, relDayLabel, snap, todayKey, weekdayIdx,
 } from "../lib/time";
@@ -75,12 +77,19 @@ export default function TodayScreen({
     return () => window.clearTimeout(t);
   }, [armedDelete]);
 
-  const dayTasks = useMemo(() => app.tasks.filter((t) => t.date === date), [app.tasks, date]);
+  /* родители повторяющихся задач не рендерятся — только их экземпляры */
+  const dayTasks = useMemo(() => app.tasks.filter((t) => t.date === date && !t.recurrenceRule), [app.tasks, date]);
   const placed = useMemo(() => layout(dayTasks), [dayTasks]);
   const today = todayKey();
   const isToday = date === today;
   const todayMood = app.moods.find((m) => m.date === today)?.mood;
   const sleep = app.user?.sleepHours ?? 7.5;
+  const colors = resolveColors(app.user);
+
+  useHotkeys({
+    arrowleft: () => setDate((d) => addDaysKey(d, -1)),
+    arrowright: () => setDate((d) => addDaysKey(d, 1)),
+  });
 
   const done = dayTasks.filter((t) => t.status === "done").length;
   const total = dayTasks.length;
@@ -162,7 +171,9 @@ export default function TodayScreen({
   }, [sleep, todayMood]);
 
   return (
-    <div className="mx-auto flex max-w-[1180px] flex-col gap-5 xl:flex-row">
+    <div className="mx-auto max-w-[1180px] space-y-5">
+      {isToday && <SuggestionBanner onPlan={(s) => onNewAt(date, s)} />}
+      <div className="flex flex-col gap-5 xl:flex-row">
       {/* ============ TIMELINE ============ */}
       <section className="anim-rise card flex min-w-0 flex-1 flex-col overflow-hidden">
         <header className="flex items-center gap-2 border-b border-white/6 px-4 py-3">
@@ -254,7 +265,7 @@ export default function TodayScreen({
                   const e = d ? d.endMin : t.endMin;
                   const top = (s - DAY_START) * PPM;
                   const h = Math.max(26, (e - s) * PPM - 3);
-                  const c = TASK_COLORS[t.color];
+                  const c = colors[t.color];
                   const compact = e - s <= 35;
                   const isDone = t.status === "done";
                   const isSkipped = t.status === "skipped";
@@ -291,6 +302,11 @@ export default function TodayScreen({
                           {t.source === "gcal" && (
                             <span className="chip !px-1.5 !py-0 !text-[9px] !text-ind-400">
                               <I n="cloud" size={9} /> G
+                            </span>
+                          )}
+                          {(t.parentTaskId || t.recurrenceRule) && (
+                            <span className="chip !px-1.5 !py-0 !text-[9px] !text-vio-300" title="Повторяющаяся задача">
+                              <I n="refresh" size={9} />
                             </span>
                           )}
                           {t.syncStatus === "pending" && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" title="Ждёт синхронизации" />}
@@ -420,6 +436,7 @@ export default function TodayScreen({
         <RoutinesCard date={date} />
         <HintCard />
       </aside>
+      </div>
     </div>
   );
 }
@@ -448,7 +465,7 @@ function NowCard({
     return d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
   })();
 
-  const dayTasks = app.tasks.filter((t) => t.date === today);
+  const dayTasks = app.tasks.filter((t) => t.date === today && !t.recurrenceRule);
   const current = dayTasks.find((t) => t.status === "todo" && t.startMin <= now && t.endMin > now);
   const next = dayTasks.filter((t) => t.status === "todo" && t.startMin > now).sort((a, b) => a.startMin - b.startMin)[0];
   const done = dayTasks.filter((t) => t.status === "done").length;
@@ -471,7 +488,8 @@ function NowCard({
   }
 
   const active = current ?? next;
-  const c = active ? TASK_COLORS[active.color] : "#37D6C0";
+  const colors = resolveColors(app.user);
+  const c = active ? colors[active.color] : "#37D6C0";
 
   return (
     <div className="anim-rise d-1 card relative overflow-hidden p-4">
@@ -609,6 +627,7 @@ function RoutinesCard({ date }: { date: string }) {
   const app = useApp();
   const wd = weekdayIdx(date);
   const rs = app.routines.filter((r) => r.days.includes(wd));
+  const colors = resolveColors(app.user);
 
   return (
     <div className="anim-rise d-3 card p-4">

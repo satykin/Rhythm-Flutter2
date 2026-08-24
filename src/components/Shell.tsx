@@ -2,21 +2,41 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleG, I, IconName, LogoMark } from "./icons";
 import { Modal, Seg, Spinner } from "./ui";
 import { useApp } from "../state/store";
-import type { TabId, Toast } from "../lib/types";
-import { fmtClock, fmtDateLong, todayKey, plural } from "../lib/time";
-import { initials } from "../lib/palette";
+import type { TabId, TaskColor, Toast } from "../lib/types";
+import { fmtClock, fmtDateLong, hmToMin, minToHM, todayKey, plural } from "../lib/time";
+import { COLOR_NAMES, initials, PALETTE_LIST, TASK_COLORS } from "../lib/palette";
+import { NOTIF_META, notify } from "../features/notify/notify";
 
-const NAV: { id: TabId; icon: IconName; label: string }[] = [
-  { id: "today", icon: "sun", label: "Сегодня" },
-  { id: "rhythm", icon: "pulse", label: "Ритм" },
-  { id: "character", icon: "spark", label: "Персонаж" },
-  { id: "together", icon: "users", label: "Вместе" },
-  { id: "insights", icon: "chart", label: "Инсайты" },
+const NOTIF_KEYS = Object.keys(NOTIF_META) as (keyof typeof NOTIF_META)[];
+
+function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <button
+      role="switch"
+      aria-checked={on}
+      onClick={onToggle}
+      className={`relative h-[20px] w-[36px] shrink-0 rounded-full transition-colors ${on ? "bg-aqua-500" : "bg-ink-600"}`}
+    >
+      <span className={`absolute top-[2.5px] h-[15px] w-[15px] rounded-full bg-white shadow transition-all ${on ? "left-[18px]" : "left-[3px]"}`} />
+    </button>
+  );
+}
+
+const NAV: { id: TabId; icon: IconName; label: string; short: string }[] = [
+  { id: "today", icon: "sun", label: "Сегодня", short: "День" },
+  { id: "flow", icon: "play", label: "Фокус", short: "Фокус" },
+  { id: "rhythm", icon: "pulse", label: "Ритм", short: "Ритм" },
+  { id: "journal", icon: "book", label: "Журнал", short: "Журнал" },
+  { id: "character", icon: "spark", label: "Персонаж", short: "Герой" },
+  { id: "together", icon: "users", label: "Вместе", short: "Вместе" },
+  { id: "insights", icon: "chart", label: "Инсайты", short: "Данные" },
 ];
 
 const TITLES: Record<TabId, { t: string; s: string }> = {
   today: { t: "Сегодня", s: "Твой адаптивный таймлайн" },
+  flow: { t: "Фокус", s: "Flow Sessions: таймер, звуки, музыка" },
   rhythm: { t: "Ритм", s: "Энергия дня и лучшие слоты" },
+  journal: { t: "Журнал", s: "Настроение, заметки и инсайты" },
   character: { t: "Персонаж", s: "Life Character: уровни и статы" },
   together: { t: "Вместе", s: "Sync-сессии и статусы друзей" },
   insights: { t: "Инсайты", s: "Паттерны твоей продуктивности" },
@@ -143,6 +163,102 @@ function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }
             </div>
             <p className="mt-2 text-[11.5px] leading-relaxed text-mist-500">Влияет на кривую энергии в «Ритме» и умные подсказки.</p>
           </section>
+
+          {/* тема таймлайна */}
+          <section className="card !rounded-xl p-4">
+            <span className="label">Тема таймлайна</span>
+            <div className="mt-1 flex gap-2">
+              {PALETTE_LIST.map((p) => (
+                <button
+                  key={p.id}
+                  title={p.label}
+                  onClick={() => {
+                    app.updateUser({ themePalette: p.id });
+                    app.toast("success", `Тема: ${p.label}`);
+                  }}
+                  className={`flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border-2 transition ${
+                    user.themePalette === p.id ? "border-white/70 scale-[1.03]" : "border-transparent opacity-70 hover:opacity-100"
+                  } bg-ink-800`}
+                  aria-label={p.label}
+                >
+                  {p.swatch.map((c) => (
+                    <span key={c} className="h-3.5 w-3.5 rounded-full" style={{ background: c }} />
+                  ))}
+                </button>
+              ))}
+            </div>
+            <div className="mt-2.5 flex items-center gap-2">
+              <span className="text-[11px] font-bold text-mist-500">Свой цвет:</span>
+              <select
+                className="input !w-auto !py-1 !text-[11.5px]"
+                value={user.customColor?.slot ?? "violet"}
+                onChange={(e) =>
+                  app.updateUser({ customColor: { slot: e.target.value as TaskColor, hex: user.customColor?.hex ?? "#C084FC" } })
+                }
+                aria-label="Слот цвета"
+              >
+                {(Object.keys(TASK_COLORS) as TaskColor[]).map((c) => (
+                  <option key={c} value={c}>{COLOR_NAMES[c]}</option>
+                ))}
+              </select>
+              <input
+                type="color"
+                value={user.customColor?.hex ?? "#C084FC"}
+                onChange={(e) =>
+                  app.updateUser({ customColor: { slot: user.customColor?.slot ?? "violet", hex: e.target.value } })
+                }
+                className="h-8 w-10 cursor-pointer rounded-md border border-white/10 bg-ink-800"
+                aria-label="Выбор цвета"
+              />
+            </div>
+          </section>
+
+          {/* уведомления */}
+          <section className="card !rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <span className="label !mb-0">Push-уведомления</span>
+              <Switch
+                on={user.notifications.enabled}
+                onToggle={async () => {
+                  const next = !user.notifications.enabled;
+                  if (next && !(await notify.request())) {
+                    app.toast("error", "Браузер не дал разрешение на уведомления");
+                    return;
+                  }
+                  app.updateUser({ notifications: { ...user.notifications, enabled: next } });
+                  app.toast(next ? "success" : "info", next ? "Уведомления включены" : "Уведомления выключены");
+                }}
+              />
+            </div>
+            {notify.permission() === "denied" && (
+              <p className="mt-1.5 text-[11px] font-semibold text-warn">Браузер заблокировал уведомления — разреши их в настройках сайта</p>
+            )}
+            <div className={`mt-2.5 space-y-2 ${user.notifications.enabled ? "" : "pointer-events-none opacity-45"}`}>
+              {(Object.keys(NOTIF_META) as (keyof typeof NOTIF_META)[]).map((k) => (
+                <div key={k} className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-bold text-mist-200">{NOTIF_META[k].label}</div>
+                    <div className="text-[10.5px] text-mist-500">{NOTIF_META[k].desc}</div>
+                  </div>
+                  <Switch
+                    on={user.notifications[k]}
+                    onToggle={() => app.updateUser({ notifications: { ...user.notifications, [k]: !user.notifications[k] } })}
+                  />
+                </div>
+              ))}
+              <div className="flex items-center justify-between gap-2 border-t border-white/6 pt-2">
+                <div>
+                  <div className="text-[12px] font-bold text-mist-200">Тихие часы</div>
+                  <div className="text-[10.5px] text-mist-500">уведомления молчат</div>
+                </div>
+                <div className="flex items-center gap-1 text-[12px] text-mist-400">
+                  <input type="time" className="input !w-auto !px-2 !py-1 !text-[11.5px]" value={minToHM(user.quietFrom)} onChange={(e) => e.target.value && app.updateUser({ quietFrom: hmToMin(e.target.value) })} aria-label="Тихие часы: начало" />
+                  –
+                  <input type="time" className="input !w-auto !px-2 !py-1 !text-[11.5px]" value={minToHM(user.quietTo)} onChange={(e) => e.target.value && app.updateUser({ quietTo: hmToMin(e.target.value) })} aria-label="Тихие часы: конец" />
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
 
         {/* календарь */}
@@ -240,8 +356,46 @@ function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }
   );
 }
 
+/* ================= Горячие клавиши ================= */
+const HOTKEYS: { keys: string; desc: string }[] = [
+  { keys: "N", desc: "Новая задача" },
+  { keys: "T / F / R / J", desc: "Сегодня · Фокус · Ритм · Журнал" },
+  { keys: "C / G / I", desc: "Персонаж · Вместе · Инсайты" },
+  { keys: "← / →", desc: "Предыдущий / следующий день (на «Сегодня»)" },
+  { keys: "?", desc: "Эта справка" },
+  { keys: "Esc", desc: "Закрыть окно" },
+];
+
+function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return (
+    <Modal open={open} onClose={onClose} title="Горячие клавиши" icon="bolt" width={420}>
+      <div className="space-y-1.5">
+        {HOTKEYS.map((h) => (
+          <div key={h.keys} className="flex items-center justify-between rounded-lg bg-white/[0.02] px-3 py-2">
+            <span className="text-[12.5px] font-semibold text-mist-300">{h.desc}</span>
+            <span className="font-display text-[11px] font-bold text-vio-300">{h.keys}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[11px] font-semibold text-mist-500">Сочетания не срабатывают, когда фокус в поле ввода.</p>
+    </Modal>
+  );
+}
+
 /* ================= Каркас ================= */
-export default function Shell({ onNewTask, children }: { onNewTask: () => void; children: React.ReactNode }) {
+export default function Shell({
+  onNewTask,
+  onHelp,
+  helpOpen,
+  onCloseHelp,
+  children,
+}: {
+  onNewTask: () => void;
+  onHelp: () => void;
+  helpOpen: boolean;
+  onCloseHelp: () => void;
+  children: React.ReactNode;
+}) {
   const app = useApp();
   const { tab, user, sync } = app;
   const [settings, setSettings] = useState(false);
@@ -355,6 +509,9 @@ export default function Shell({ onNewTask, children }: { onNewTask: () => void; 
             <I n="clock" size={12} className="text-aqua-300" />
             <span className="font-display font-bold text-mist-200">{clock}</span>
           </span>
+          <button className="btn btn-ghost !px-3 !py-2" onClick={onHelp} aria-label="Горячие клавиши" title="Горячие клавиши (?)">
+            <I n="bolt" size={15} />
+          </button>
           <button
             className="btn btn-ghost !px-3 !py-2"
             onClick={() => setSettings(true)}
@@ -380,12 +537,12 @@ export default function Shell({ onNewTask, children }: { onNewTask: () => void; 
               <button
                 key={n.id}
                 onClick={() => app.setTab(n.id)}
-                className={`flex flex-1 flex-col items-center gap-1 py-2.5 text-[10px] font-bold transition ${
+                className={`flex flex-1 flex-col items-center gap-1 py-2.5 text-[9px] font-bold transition ${
                   active ? "text-vio-300" : "text-mist-500"
                 }`}
               >
                 <I n={n.icon} size={19} sw={active ? 2.1 : 1.8} />
-                {n.label}
+                {n.short}
               </button>
             );
           })}
@@ -393,6 +550,7 @@ export default function Shell({ onNewTask, children }: { onNewTask: () => void; 
       </div>
 
       <SettingsModal open={settings} onClose={() => setSettings(false)} />
+      <HelpModal open={helpOpen} onClose={onCloseHelp} />
       <ToastHost />
     </div>
   );

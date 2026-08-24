@@ -6,11 +6,14 @@ import TodayScreen from "./components/TodayScreen";
 import RhythmScreen from "./components/RhythmScreen";
 import CharacterScreen from "./components/CharacterScreen";
 import TogetherScreen from "./components/TogetherScreen";
-import InsightsScreen from "./components/InsightsScreen";
+import FlowScreen from "./features/flow/FlowScreen";
+import JournalScreen from "./features/journal/JournalScreen";
+import InsightsScreen from "./features/insights/InsightsScreen";
 import TaskModal, { TaskDraft } from "./components/TaskModal";
 import { LogoMark } from "./components/icons";
 import { todayKey } from "./lib/time";
-import type { Task } from "./lib/types";
+import { useHotkeys } from "./shared/hooks/useHotkeys";
+import type { TabId, Task } from "./lib/types";
 
 function Splash() {
   return (
@@ -32,6 +35,10 @@ function Splash() {
   );
 }
 
+const KEY_TABS: Record<string, TabId> = {
+  t: "today", f: "flow", r: "rhythm", j: "journal", c: "character", g: "together", i: "insights",
+};
+
 function Body() {
   const app = useApp();
   const [modal, setModal] = useState<{ open: boolean; task: Task | null; draft: TaskDraft | null }>({
@@ -39,6 +46,16 @@ function Body() {
     task: null,
     draft: null,
   });
+  const [helpOpen, setHelpOpen] = useState(false);
+
+  useHotkeys(
+    {
+      ...Object.fromEntries(Object.entries(KEY_TABS).map(([k, tab]) => [k, () => app.setTab(tab)])),
+      n: () => setModal({ open: true, task: null, draft: { date: todayKey(), startMin: 540 } }),
+      "?": () => setHelpOpen((v) => !v),
+    },
+    app.booted && !!app.user
+  );
 
   if (!app.booted) return <Splash />;
   if (!app.user)
@@ -56,9 +73,11 @@ function Body() {
   return (
     <>
       <div className="rhythm-bg" />
-      <Shell onNewTask={() => openNew()}>
+      <Shell onNewTask={() => openNew()} onHelp={() => setHelpOpen(true)} helpOpen={helpOpen} onCloseHelp={() => setHelpOpen(false)}>
         {app.tab === "today" && <TodayScreen onEdit={openEdit} onNewAt={(date, startMin) => openNew({ date, startMin })} />}
+        {app.tab === "flow" && <FlowScreen />}
         {app.tab === "rhythm" && <RhythmScreen onPlanSlot={(start, end) => openNew({ date: todayKey(), startMin: start, endMin: end })} />}
+        {app.tab === "journal" && <JournalScreen />}
         {app.tab === "character" && <CharacterScreen />}
         {app.tab === "together" && <TogetherScreen />}
         {app.tab === "insights" && <InsightsScreen />}

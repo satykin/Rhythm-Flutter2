@@ -8,8 +8,12 @@ import { db, sessionStore } from "../lib/db";
 import { seedFor } from "../lib/seed";
 import { googleProvider } from "../lib/sync";
 import { clamp, demoHash, hmToMin, nowMin, todayKey, uid } from "../lib/time";
+import { parseRRule, occurrences } from "../features/timeline/recurrence";
+import { generateCandidates, reschedulePlan, productivityWindows } from "../features/suggestions/suggestionService";
+import { startScheduler, registerWorker } from "../features/notify/notify";
 import type {
-  MoodLog, Routine, SyncLogLine, SyncState, TabId, Task, TaskStatus, Toast, User,
+  FocusSession, MoodLog, Routine, Suggestion, SyncLogLine, SyncState, TabId, Task, TaskStatus,
+  TaskTemplate, Toast, ToastAction, User,
 } from "../lib/types";
 
 interface AppState {
@@ -18,6 +22,9 @@ interface AppState {
   tasks: Task[];
   routines: Routine[];
   moods: MoodLog[];
+  templates: TaskTemplate[];
+  suggestions: Suggestion[];
+  focusSessions: FocusSession[];
   sync: SyncState;
   syncLog: SyncLogLine[];
   tab: TabId;
@@ -30,10 +37,21 @@ const initial: AppState = {
   tasks: [],
   routines: [],
   moods: [],
+  templates: [],
+  suggestions: [],
+  focusSessions: [],
   sync: { connected: false, autoSync: true, syncing: false },
   syncLog: [],
   tab: "today",
   toasts: [],
+};
+
+const DEFAULT_PREFS: User["notifications"] = {
+  enabled: false,
+  taskReminder: true,
+  focusTime: true,
+  morningBriefing: true,
+  eveningReview: true,
 };
 
 export interface NewTaskInput {
@@ -46,10 +64,11 @@ export interface NewTaskInput {
   icon: string;
   tags: string[];
   energy: Task["energy"];
+  recurrenceRule?: string;
 }
 
 interface Ctx extends AppState {
-  toast: (kind: Toast["kind"], text: string) => void;
+  toast: (kind: Toast["kind"], text: string, actions?: ToastAction[]) => void;
   dismissToast: (id: number) => void;
   setTab: (t: TabId) => void;
 
@@ -65,7 +84,19 @@ interface Ctx extends AppState {
   setTaskStatus: (id: string, status: TaskStatus) => void;
   applyRoutine: (r: Routine) => { time: number } | null;
 
-  saveMood: (level: number, note?: string) => void;
+  saveMood: (level: number, note?: string, tags?: string[]) => void;
+  updateMoodLog: (id: string, patch: Partial<Pick<MoodLog, "mood" | "note" | "tags" | "linkedTaskIds">>) => void;
+
+  logFocusSession: (s: Omit<FocusSession, "id" | "userId" | "date">) => void;
+
+  addTemplate: (t: Omit<TaskTemplate, "id" | "userId">) => void;
+  removeTemplate: (id: string) => void;
+
+  pendingSuggestion: () => Suggestion | null;
+  acceptSuggestion: (id: string) => void;
+  dismissSuggestion: (id: string) => void;
+  snoozeSuggestion: (id: string) => void;
+  applyReschedule: () => number;
 
   connectCalendar: () => Promise<void>;
   disconnectCalendar: () => void;
@@ -97,30 +128,97 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   /* ---------- helpers ---------- */
   const patch = useCallback((p: Partial<AppState>) => setState((s) => ({ ...s, ...p })), []);
 
+  const persistSync = useCallback((sync: SyncState) => {
+    const userId = stateRef.current.user?.id;
+    if (!userId) return;
+    try { localStorage.setItem(`${SYNC_KEY}:${userId}`, JSON.stringify({ ...sync, syncing: false })); } catch { /* ignore */ }
+  }, []);
+
+  /* Материализация повторяющихся задач: создаёт экземпляры на 7 дней вперёд. */
+  const materializeRecurrences = useCallback((userId: string) => {
+    const parents = db.tasksOf(userId).filter((t) => t.recurrenceRule && !t.parentTaskId);
+    const today = todayKey();
+    for (const p of parents) {
+      const rule = parseRRule(p.recurrenceRule!);
+      if (!rule) continue;
+      const dates = occurrences(rule, p.date, today, 7);
+      for (const d of dates) {
+        if (d === p.date) continue;
+        const exists = db.tasksOf(userId).some((t) => t.parentTaskId === p.id && t.date === d);
+        if (exists) continue;
+        const now = new Date().toISOString();
+        db.insertTask({
+          ...p, id: uid(), date: d, status: "todo",
+          parentTaskId: p.id, recurrenceRule: undefined, externalId: undefined,
+          syncStatus: "local", createdAt: now, updatedAt: now,
+        });
+      }
+    }
+  }, []);
+
+  /* Подсказки: генерация кандидатов + дедупликация по ключу. */
+  const refreshSuggestions = useCallback((userId: string) => {
+    const today = todayKey();
+    /* вчерашние подсказки больше не актуальны */
+    for (const s of db.suggestionsOf(userId)) {
+      if (s.status === "pending" && s.createdAt.slice(0, 10) < today) {
+        db.updateSuggestion({ ...s, status: "dismissed" });
+      }
+    }
+    const cands = generateCandidates(db.tasksOf(userId));
+    const existing = db.suggestionsOf(userId);
+    for (const c of cands) {
+      const dup = existing.some(
+        (s) => s.dedupKey === c.dedupKey && (s.status === "pending" || s.status === "snoozed")
+      );
+      if (dup) continue;
+      db.insertSuggestion({
+        id: uid(), userId, type: c.type, title: c.title, detail: c.detail,
+        context: c.context, status: "pending", dedupKey: c.dedupKey,
+        createdAt: new Date().toISOString(),
+      });
+      existing.push({
+        id: "tmp", userId, type: c.type, title: c.title, detail: c.detail,
+        context: c.context, status: "pending", dedupKey: c.dedupKey, createdAt: "",
+      });
+    }
+  }, []);
+
   const refreshFromDb = useCallback((userId: string) => {
+    materializeRecurrences(userId);
+    refreshSuggestions(userId);
+    const now = Date.now();
     patch({
       tasks: db.tasksOf(userId).sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin),
       routines: db.routinesOf(userId),
       moods: db.moodsOf(userId),
+      templates: db.templatesOf(userId),
+      suggestions: db
+        .suggestionsOf(userId)
+        .filter((s) => s.status === "pending" || (s.status === "snoozed" && (s.snoozeUntil ?? 0) <= now)),
+      focusSessions: db.focusSessionsOf(userId),
     });
-  }, [patch]);
+  }, [materializeRecurrences, patch, refreshSuggestions]);
 
-  const toast = useCallback((kind: Toast["kind"], text: string) => {
+  const toast = useCallback((kind: Toast["kind"], text: string, actions?: ToastAction[]) => {
     const id = toastId.current++;
-    setState((s) => ({ ...s, toasts: [...s.toasts.slice(-3), { id, kind, text }] }));
+    setState((s) => ({ ...s, toasts: [...s.toasts.slice(-3), { id, kind, text, actions }] }));
     window.setTimeout(() => {
       setState((s) => ({ ...s, toasts: s.toasts.filter((t) => t.id !== id) }));
-    }, 3800);
+    }, actions ? 7000 : 3800);
   }, []);
 
   const dismissToast = useCallback((id: number) => {
     setState((s) => ({ ...s, toasts: s.toasts.filter((t) => t.id !== id) }));
   }, []);
 
-  const persistSync = useCallback((sync: SyncState) => {
-    const userId = stateRef.current.user?.id;
-    if (!userId) return;
-    try { localStorage.setItem(`${SYNC_KEY}:${userId}`, JSON.stringify({ ...sync, syncing: false })); } catch { /* ignore */ }
+  const seedInto = useCallback((user: User) => {
+    const seeded = seedFor(user);
+    seeded.tasks.forEach((t) => db.insertTask(t));
+    seeded.routines.forEach((r) => db.insertRoutine(r));
+    seeded.moods.forEach((m) => db.insertMood(m));
+    seeded.templates.forEach((t) => db.insertTemplate(t));
+    seeded.focusSessions.forEach((s) => db.insertFocusSession(s));
   }, []);
 
   /* ---------- boot ---------- */
@@ -138,18 +236,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         patch({ user, sync: { ...loadSyncState(user.id), syncing: false } });
       }
       patch({ booted: true });
+      void registerWorker();
+      startScheduler(() => {
+        const st = stateRef.current;
+        if (!st.user) return null;
+        return {
+          prefs: st.user.notifications,
+          quietFrom: st.user.quietFrom,
+          quietTo: st.user.quietTo,
+          tasks: st.tasks,
+        };
+      });
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [patch, refreshFromDb, seedInto]);
 
   /* ---------- auth ---------- */
-  const seedInto = useCallback((user: User) => {
-    const seeded = seedFor(user);
-    seeded.tasks.forEach((t) => db.insertTask(t));
-    seeded.routines.forEach((r) => db.insertRoutine(r));
-    seeded.moods.forEach((m) => db.insertMood(m));
-  }, []);
-
   const enterAs = useCallback(async (user: User, isNew: boolean) => {
     if (isNew) seedInto(user);
     sessionStore.write(user.id);
@@ -164,6 +265,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const user: User = {
       id: uid(), name, email, passHash: demoHash(pass), provider: "email",
       accent: "violet", sleepHours: 7.5, createdAt: new Date().toISOString(),
+      themePalette: "default", quietFrom: 22 * 60, quietTo: 8 * 60, notifications: { ...DEFAULT_PREFS },
     };
     db.insertUser(user);
     await enterAs(user, true);
@@ -190,6 +292,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         id: uid(), name: "Alex Day", email, provider,
         accent: provider === "google" ? "indigo" : "aqua", sleepHours: 7.5,
         createdAt: new Date().toISOString(),
+        themePalette: "default", quietFrom: 22 * 60, quietTo: 8 * 60, notifications: { ...DEFAULT_PREFS },
       };
       db.insertUser(user);
     }
@@ -199,16 +302,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(() => {
     sessionStore.clear();
-    patch({ user: null, tasks: [], routines: [], moods: [], tab: "today", sync: initial.sync, syncLog: [] });
+    patch({ user: null, tasks: [], routines: [], moods: [], templates: [], suggestions: [], focusSessions: [], tab: "today", sync: initial.sync, syncLog: [] });
   }, [patch]);
 
   const updateUser = useCallback((p: Partial<User>) => {
     const u = stateRef.current.user;
     if (!u) return;
     const next = { ...u, ...p };
-    const sch = db.get();
-    const i = sch.users.findIndex((x) => x.id === u.id);
-    if (i >= 0) sch.users[i] = next;
+    db.updateUser(next);
     void db.commit();
     patch({ user: next });
   }, [patch]);
@@ -225,10 +326,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       createdAt: now, updatedAt: now,
     };
     db.insertTask(task);
+    if (task.recurrenceRule) materializeRecurrences(u.id);
     void db.commit();
     refreshFromDb(u.id);
     return task;
-  }, [refreshFromDb]);
+  }, [materializeRecurrences, refreshFromDb]);
 
   const updateTask = useCallback((id: string, p: Partial<Task>) => {
     const u = stateRef.current.user!;
@@ -237,12 +339,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const connected = stateRef.current.sync.connected;
     const next: Task = {
       ...t, ...p, updatedAt: new Date().toISOString(),
-      syncStatus: connected ? "pending" : t.syncStatus,
+      syncStatus: connected && !t.parentTaskId ? "pending" : t.syncStatus,
     };
     db.updateTask(next);
+    if (next.recurrenceRule && !next.parentTaskId) materializeRecurrences(u.id);
     void db.commit();
     refreshFromDb(u.id);
-  }, [refreshFromDb]);
+  }, [materializeRecurrences, refreshFromDb]);
 
   const removeTask = useCallback((id: string) => {
     const st = stateRef.current;
@@ -270,15 +373,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const u = stateRef.current.user!;
     const today = todayKey();
     const dayTasks = db.tasksOf(u.id).filter((t) => t.date === today && t.status !== "skipped");
-    let start = clamp(hmToMin(r.timeHint), 6 * 60, 23 * 60 - r.durationMin);
-    const overlaps = (s: number, e: number) => dayTasks.some((t) => s < t.endMin && e > t.startMin);
     const maxStart = 23 * 60 - r.durationMin;
+    let start = clamp(hmToMin(r.timeHint), 6 * 60, Math.max(6 * 60, maxStart));
+    const overlaps = (s: number, e: number) => dayTasks.some((t) => s < t.endMin && e > t.startMin);
     let guard = 0;
-    while (overlaps(start, start + r.durationMin) && guard++ < 60) {
-      start += 15;
-      if (start > maxStart) return null; // день плотный — свободного окна до конца дня нет
-    }
-    if (overlaps(start, start + r.durationMin)) return null;
+    while (overlaps(start, start + r.durationMin) && guard++ < 60 && start <= maxStart) start += 15;
+    if (overlaps(start, start + r.durationMin) || start > maxStart) return null;
     addTask({
       title: r.title, description: "", date: today,
       startMin: start, endMin: start + r.durationMin,
@@ -287,18 +387,114 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { time: start };
   }, [addTask]);
 
-  /* ---------- mood ---------- */
-  const saveMood = useCallback((level: number, note?: string) => {
+  /* ---------- mood (Journal 2.0) ---------- */
+  const saveMood = useCallback((level: number, note?: string, tags?: string[]) => {
     const u = stateRef.current.user!;
     const today = todayKey();
+    const linkedTaskIds = db.tasksOf(u.id).filter((t) => t.date === today).map((t) => t.id);
     const existing = db.moodsOf(u.id).find((m) => m.date === today);
     if (existing) {
-      db.updateMood({ ...existing, mood: level, note: note ?? existing.note, timeMin: nowMin() });
+      db.updateMood({
+        ...existing, mood: level,
+        note: note ?? existing.note,
+        tags: tags ?? existing.tags,
+        linkedTaskIds,
+        timeMin: nowMin(),
+      });
     } else {
-      db.insertMood({ id: uid(), userId: u.id, date: today, timeMin: nowMin(), mood: level, note });
+      db.insertMood({
+        id: uid(), userId: u.id, date: today, timeMin: nowMin(),
+        mood: level, note, tags: tags ?? [], linkedTaskIds,
+      });
     }
     void db.commit();
     refreshFromDb(u.id);
+  }, [refreshFromDb]);
+
+  const updateMoodLog = useCallback((id: string, p: Partial<Pick<MoodLog, "mood" | "note" | "tags" | "linkedTaskIds">>) => {
+    const u = stateRef.current.user!;
+    const m = db.moodsOf(u.id).find((x) => x.id === id);
+    if (!m) return;
+    db.updateMood({ ...m, ...p });
+    void db.commit();
+    refreshFromDb(u.id);
+  }, [refreshFromDb]);
+
+  /* ---------- flow sessions ---------- */
+  const logFocusSession = useCallback((s: Omit<FocusSession, "id" | "userId" | "date">) => {
+    const u = stateRef.current.user!;
+    db.insertFocusSession({ ...s, id: uid(), userId: u.id, date: s.startedAt.slice(0, 10) });
+    void db.commit();
+    refreshFromDb(u.id);
+  }, [refreshFromDb]);
+
+  /* ---------- templates ---------- */
+  const addTemplate = useCallback((t: Omit<TaskTemplate, "id" | "userId">) => {
+    const u = stateRef.current.user!;
+    db.insertTemplate({ ...t, id: uid(), userId: u.id });
+    void db.commit();
+    refreshFromDb(u.id);
+  }, [refreshFromDb]);
+
+  const removeTemplate = useCallback((id: string) => {
+    const u = stateRef.current.user!;
+    db.removeTemplate(id);
+    void db.commit();
+    refreshFromDb(u.id);
+  }, [refreshFromDb]);
+
+  /* ---------- suggestions ---------- */
+  const pendingSuggestion = useCallback((): Suggestion | null => {
+    const list = stateRef.current.suggestions;
+    const now = Date.now();
+    const visible = list
+      .filter((s) => s.status === "pending" || (s.status === "snoozed" && (s.snoozeUntil ?? 0) <= now))
+      .sort((a, b) => (a.type === "reschedule" ? -1 : 1) - (b.type === "reschedule" ? -1 : 1));
+    return visible[0] ?? null;
+  }, []);
+
+  const setSuggestionStatus = useCallback((id: string, status: Suggestion["status"], snoozeUntil?: number) => {
+    const u = stateRef.current.user;
+    if (!u) return;
+    const s = db.suggestionsOf(u.id).find((x) => x.id === id);
+    if (!s) return;
+    db.updateSuggestion({ ...s, status, snoozeUntil });
+    void db.commit();
+    refreshFromDb(u.id);
+  }, [refreshFromDb]);
+
+  const acceptSuggestion = useCallback((id: string) => {
+    const s = db.suggestionsOf(stateRef.current.user!.id).find((x) => x.id === id);
+    if (!s) return;
+    setSuggestionStatus(id, "accepted");
+  }, [setSuggestionStatus]);
+
+  const dismissSuggestion = useCallback((id: string) => {
+    setSuggestionStatus(id, "dismissed");
+  }, [setSuggestionStatus]);
+
+  const snoozeSuggestion = useCallback((id: string) => {
+    setSuggestionStatus(id, "snoozed", Date.now() + 2 * 60 * 60 * 1000);
+    toast("info", "Подсказка вернётся через 2 часа");
+  }, [setSuggestionStatus, toast]);
+
+  const applyReschedule = useCallback((): number => {
+    const u = stateRef.current.user!;
+    const tasks = db.tasksOf(u.id);
+    const plan = reschedulePlan(tasks, productivityWindows(tasks));
+    for (const p of plan) {
+      const t = tasks.find((x) => x.id === p.task.id);
+      if (!t) continue;
+      db.updateTask({
+        ...t, date: todayKey(), startMin: p.startMin, endMin: p.endMin,
+        status: "todo", updatedAt: new Date().toISOString(),
+      });
+    }
+    if (plan.length) {
+      void db.commit();
+      refreshFromDb(u.id);
+    }
+    return plan.length;
   }, [refreshFromDb]);
 
   /* ---------- calendar sync ---------- */
@@ -316,8 +512,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       /* pull */
       const events = await googleProvider.pull();
+      const removed = new Set(stateRef.current.sync.removedExternalIds ?? []);
       const existing = new Set(db.tasksOf(u.id).map((t) => t.externalId).filter(Boolean));
-      const removed = new Set(st.sync.removedExternalIds ?? []);
       let pulled = 0;
       for (const ev of events) {
         if (existing.has(ev.externalId) || removed.has(ev.externalId)) continue;
@@ -410,7 +606,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     toast, dismissToast, setTab: (t) => patch({ tab: t }),
     signIn, signUp, signInWith, signOut, updateUser,
     addTask, updateTask, removeTask, setTaskStatus, applyRoutine,
-    saveMood,
+    saveMood, updateMoodLog,
+    logFocusSession,
+    addTemplate, removeTemplate,
+    pendingSuggestion, acceptSuggestion, dismissSuggestion, snoozeSuggestion, applyReschedule,
     connectCalendar, disconnectCalendar, syncNow: (silent = false) => runSync(silent), setAutoSync,
     wipeAndReseed,
   };
@@ -423,5 +622,3 @@ export function useApp(): Ctx {
   if (!ctx) throw new Error("useApp outside AppProvider");
   return ctx;
 }
-
-

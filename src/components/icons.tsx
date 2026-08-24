@@ -8,7 +8,7 @@ export type IconName =
   | "sun" | "spark" | "chart" | "briefcase" | "book" | "dumbbell" | "home" | "coffee"
   | "heart" | "music" | "target" | "flame" | "moon" | "grip" | "external" | "alert"
   | "info" | "play" | "chevronDown" | "chevronRight" | "arrowRight" | "logout"
-  | "mic" | "dot" | "shield" | "layers" | "timer" | "cloud" | "pulse";
+  | "mic" | "dot" | "shield" | "layers" | "timer" | "cloud" | "pulse" | "download" | "file";
 
 const P: Record<IconName, React.ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
@@ -56,6 +56,8 @@ const P: Record<IconName, React.ReactNode> = {
   timer: (<><circle cx="12" cy="13.5" r="7.5" /><path d="M12 10v3.5l2.3 1.5" /><path d="M9.5 3h5" /><path d="M12 3v3" /></>),
   cloud: <path d="M7 18.5a4.5 4.5 0 01-.6-8.96 6 6 0 0111.6 1.6A3.9 3.9 0 0117.5 18.5H7z" />,
   pulse: <path d="M3 12.5h3.5L9 5.5l4.5 13 2.5-6H21" />,
+  download: (<><path d="M12 4.5v10M7.8 10.8L12 15l4.2-4.2" /><path d="M4.5 19.5h15" /></>),
+  file: (<><path d="M13.5 3.5H7A1.5 1.5 0 005.5 5v14A1.5 1.5 0 007 20.5h10a1.5 1.5 0 001.5-1.5V8.5l-5-5z" /><path d="M13.5 3.5v5h5" /></>),
 };
 
 export function I({

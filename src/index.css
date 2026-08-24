@@ -141,6 +141,9 @@ input[type="time"].input, input[type="date"].input { color-scheme: dark; }
 @keyframes spin360 { to { transform: rotate(360deg); } }
 @keyframes drift { 0%,100% { transform: translate3d(0,0,0); } 50% { transform: translate3d(0,-14px,0); } }
 @keyframes barfill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes breath { 0%, 100% { transform: scale(0.965); } 50% { transform: scale(1.03); } }
+
+.anim-breath { animation: breath 5s ease-in-out infinite; }
 
 .anim-rise { animation: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .anim-pop { animation: pop 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
