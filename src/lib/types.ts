@@ -84,18 +84,29 @@ export interface Routine {
   days: number[];
 }
 
+/** Происхождение записи (Журнал 2.1, §4) */
+export type MoodSource = "manual" | "post_focus" | "morning" | "evening";
+
 export interface MoodLog {
   id: string;
   userId: string;
-  /** YYYY-MM-DD */
+  /** YYYY-MM-DD — локальная дата (для группировки/аналитики) */
   date: string;
+  /** минуты от начала суток — локальное время записи */
   timeMin: number;
-  /** 1..5 */
+  /** внутренний score 1..5 — НЕ показывается в UI (только эмодзи + подпись) */
   mood: number;
   note?: string;
-  /* --- Mood Journal 2.0 --- */
   tags: string[];
   linkedTaskIds: string[];
+  /* --- Mood Journal 2.1 --- */
+  source: MoodSource;
+  /** связь с Flow Session (Фаза B) */
+  focusSessionId?: string;
+  /** ISO, редактируемое для manual entry */
+  loggedAt: string;
+  /** ISO, для синхронизации и разрешения конфликтов */
+  updatedAt: string;
 }
 
 /* ---------- Flow Sessions (focus_sessions) ---------- */

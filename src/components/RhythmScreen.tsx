@@ -4,6 +4,7 @@ import { Ring } from "./ui";
 import { useApp } from "../state/store";
 import { bestSlots, dayScore, energyAt, energySeries, restWindows } from "../lib/rhythm";
 import { DAY_END, DAY_START, minToHM, todayKey } from "../lib/time";
+import { latestMoodOfDay } from "../features/mood/domain/moodService";
 
 const W = 720;
 const H = 236;
@@ -13,7 +14,7 @@ const y = (v: number) => H - 14 - (v / 100) * (H - 34);
 export default function RhythmScreen({ onPlanSlot }: { onPlanSlot: (start: number, end: number) => void }) {
   const app = useApp();
   const sleep = app.user?.sleepHours ?? 7.5;
-  const mood = app.moods.find((m) => m.date === todayKey())?.mood;
+  const mood = latestMoodOfDay(app.moods, todayKey())?.mood;
   const [hover, setHover] = useState<number | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
 

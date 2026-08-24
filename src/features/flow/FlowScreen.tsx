@@ -1023,7 +1023,7 @@ export default function FlowScreen() {
                     className="transition-transform hover:scale-110 active:scale-95"
                     aria-label={`Настроение ${lv} из 5`}
                     onClick={() => {
-                      app.saveMood(lv, `после Flow: ${cfg.label}`, ["фокус"]);
+                      app.saveMood({ mood: lv, note: `после Flow: ${cfg.label}`, tags: ["фокус"] });
                       setMoodPicked(true);
                       app.toast("success", "Настроение записано в журнал");
                     }}

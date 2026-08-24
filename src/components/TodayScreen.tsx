@@ -7,6 +7,7 @@ import { bestSlots, energySeries, restWindows } from "../lib/rhythm";
 import SuggestionSurface from "../features/suggestions/presentation/SuggestionSurface";
 import { setFlowLink } from "../features/flow/flowLink";
 import { useHotkeys } from "../shared/hooks/useHotkeys";
+import { latestMoodOfDay, moodLabel } from "../features/mood/domain/moodService";
 import {
   DAY_END, DAY_START, addDaysKey, clamp, fmtDur, minToHM, nowMin, relDayLabel, snap, todayKey, weekdayIdx,
 } from "../lib/time";
@@ -83,7 +84,7 @@ export default function TodayScreen({
   const placed = useMemo(() => layout(dayTasks), [dayTasks]);
   const today = todayKey();
   const isToday = date === today;
-  const todayMood = app.moods.find((m) => m.date === today)?.mood;
+  const todayMood = latestMoodOfDay(app.moods, today)?.mood;
   const sleep = app.user?.sleepHours ?? 7.5;
   const colors = resolveColors(app.user);
 
@@ -568,68 +569,42 @@ function NowCard({
   );
 }
 
-/* ================= Mood check-in ================= */
-const MOOD_LABELS = ["", "Тяжело", "Так себе", "Нормально", "Хорошо", "Отлично"];
-
+/* ================= Mood check-in (Журнал 2.1) =================
+ * Компактный виджет на Today: открывает глобальный Quick Check-In sheet
+ * (хоткей M). Показывает последнее состояние за сегодня. */
 function MoodCheck() {
   const app = useApp();
   const today = todayKey();
-  const log = app.moods.find((m) => m.date === today);
-  const [note, setNote] = useState(log?.note ?? "");
-  const [noteOpen, setNoteOpen] = useState(false);
+  const log = latestMoodOfDay(app.moods, today);
+  const countToday = app.moods.filter((m) => m.date === today).length;
 
   return (
     <div className="anim-rise d-2 card p-4">
       <div className="flex items-center justify-between">
         <span className="label !mb-0">Как ты сейчас?</span>
-        {log && <span className="chip !text-aqua-300 !border-aqua-400/25 !bg-aqua-400/10">записано</span>}
+        {countToday > 0 && (
+          <span className="chip !text-aqua-300 !border-aqua-400/25 !bg-aqua-400/10">
+            {countToday} {countToday === 1 ? "чек-ин" : "чек-ина"}
+          </span>
+        )}
       </div>
-      <div className="mt-2.5 flex justify-between gap-1">
-        {[1, 2, 3, 4, 5].map((lv) => (
-          <button
-            key={lv}
-            onClick={() => {
-              app.saveMood(lv, note || undefined);
-              app.toast("success", `Настроение: ${MOOD_LABELS[lv].toLowerCase()}. Rhythm учтёт это в плане`);
-            }}
-            className={`flex flex-1 flex-col items-center gap-1 rounded-xl border py-2 transition-all duration-200 hover:-translate-y-0.5 ${
-              log?.mood === lv ? "border-white/15 bg-white/[0.05]" : "border-transparent hover:bg-white/[0.035]"
-            }`}
-            title={MOOD_LABELS[lv]}
-          >
-            <MoodFace level={lv} size={30} active={log?.mood === lv} />
-            <span className={`text-[9px] font-bold ${log?.mood === lv ? "text-mist-200" : "text-mist-500"}`}>{MOOD_LABELS[lv]}</span>
-          </button>
-        ))}
-      </div>
-      {log && (
-        <div className="mt-2.5">
-          {!noteOpen ? (
-            <button className="text-[11.5px] font-bold text-vio-300 transition hover:text-vio-400" onClick={() => setNoteOpen(true)}>
-              {log.note ? `Заметка: ${log.note}` : "+ добавить заметку"}
-            </button>
-          ) : (
-            <div className="flex gap-1.5">
-              <input
-                className="input !py-1.5 !text-[12px]"
-                placeholder="Пара слов о состоянии…"
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                autoFocus
-              />
-              <button
-                className="btn btn-soft !px-2.5 !py-1.5 !text-[11.5px]"
-                onClick={() => {
-                  app.saveMood(log.mood, note || undefined);
-                  setNoteOpen(false);
-                  app.toast("success", "Заметка сохранена");
-                }}
-              >
-                <I n="check" size={13} />
-              </button>
-            </div>
-          )}
-        </div>
+      {log ? (
+        <button
+          className="mt-2.5 flex w-full items-center gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 text-left transition hover:bg-white/[0.06]"
+          onClick={() => app.openCheckIn()}
+          title="Отметить ещё раз (M)"
+        >
+          <MoodFace level={log.mood} size={30} active />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[12.5px] font-bold text-mist-100">{moodLabel(log.mood)}</span>
+            <span className="block text-[10.5px] font-semibold text-mist-500">{minToHM(log.timeMin)} · отметить ещё</span>
+          </span>
+          <I n="chevronRight" size={15} className="text-mist-500" />
+        </button>
+      ) : (
+        <button className="btn btn-soft mt-2.5 w-full" onClick={() => app.openCheckIn()}>
+          <I n="plus" size={14} sw={2.4} /> Отметить состояние
+        </button>
       )}
     </div>
   );

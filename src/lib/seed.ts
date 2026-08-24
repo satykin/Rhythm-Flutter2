@@ -106,12 +106,18 @@ export function seedFor(user: User): {
       tags: MOOD_TAGS[Math.floor(rnd() * MOOD_TAGS.length)],
       linkedTaskIds: dayTaskIds.slice(0, 3),
       note: rnd() > 0.72 ? ["День шёл по плану", "Много встреч, мало фокуса", "Хороший поток утром", "Устал к вечеру"][Math.floor(rnd() * 4)] : undefined,
+      source: "manual",
+      loggedAt: `${date}T13:00:00.000Z`,
+      updatedAt: `${date}T13:00:00.000Z`,
     });
     if (rnd() > 0.5) {
       moods.push({
         id: uid(), userId: user.id, date, timeMin: 20 * 60,
         mood: Math.max(1, Math.min(5, Math.round(base + rnd() * 1.4 - 0.4))),
         tags: [], linkedTaskIds: [],
+        source: "manual",
+        loggedAt: `${date}T20:00:00.000Z`,
+        updatedAt: `${date}T20:00:00.000Z`,
       });
     }
   }

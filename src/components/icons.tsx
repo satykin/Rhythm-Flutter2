@@ -8,7 +8,7 @@ export type IconName =
   | "sun" | "spark" | "chart" | "briefcase" | "book" | "dumbbell" | "home" | "coffee"
   | "heart" | "music" | "target" | "flame" | "moon" | "grip" | "external" | "alert"
   | "info" | "play" | "chevronDown" | "chevronRight" | "arrowRight" | "logout"
-  | "mic" | "dot" | "shield" | "layers" | "timer" | "cloud" | "pulse" | "download" | "file" | "pause";
+  | "mic" | "dot" | "shield" | "layers" | "timer" | "cloud" | "pulse" | "download" | "file" | "pause" | "search";
 
 const P: Record<IconName, React.ReactNode> = {
   plus: <path d="M12 5v14M5 12h14" />,
@@ -59,6 +59,7 @@ const P: Record<IconName, React.ReactNode> = {
   download: (<><path d="M12 4.5v10M7.8 10.8L12 15l4.2-4.2" /><path d="M4.5 19.5h15" /></>),
   file: (<><path d="M13.5 3.5H7A1.5 1.5 0 005.5 5v14A1.5 1.5 0 007 20.5h10a1.5 1.5 0 001.5-1.5V8.5l-5-5z" /><path d="M13.5 3.5v5h5" /></>),
   pause: <path d="M9.5 6.5v11M14.5 6.5v11" />,
+  search: (<><circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5L20.5 20.5" /></>),
 };
 
 export function I({

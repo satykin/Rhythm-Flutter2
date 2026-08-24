@@ -7,7 +7,8 @@ import RhythmScreen from "./components/RhythmScreen";
 import CharacterScreen from "./components/CharacterScreen";
 import TogetherScreen from "./components/TogetherScreen";
 import FlowScreen from "./features/flow/FlowScreen";
-import JournalScreen from "./features/journal/JournalScreen";
+import JournalScreen from "./features/mood/presentation/JournalScreen";
+import MoodCheckInSheet from "./features/mood/presentation/MoodCheckInSheet";
 import InsightsScreen from "./features/insights/InsightsScreen";
 import TaskModal, { TaskDraft } from "./components/TaskModal";
 import { LogoMark } from "./components/icons";
@@ -52,9 +53,11 @@ function Body() {
     {
       ...Object.fromEntries(Object.entries(KEY_TABS).map(([k, tab]) => [k, () => app.setTab(tab)])),
       n: () => setModal({ open: true, task: null, draft: { date: todayKey(), startMin: 540 } }),
+      m: () => app.openCheckIn(),
+      "ь": () => app.openCheckIn(), // M в русской раскладке
       "?": () => setHelpOpen((v) => !v),
     },
-    app.booted && !!app.user
+    app.booted && !!app.user && !app.checkInOpen
   );
 
   if (!app.booted) return <Splash />;
@@ -83,6 +86,7 @@ function Body() {
         {app.tab === "insights" && <InsightsScreen />}
       </Shell>
       <TaskModal open={modal.open} task={modal.task} draft={modal.draft} onClose={close} />
+      <MoodCheckInSheet />
     </>
   );
 }

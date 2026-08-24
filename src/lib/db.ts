@@ -12,6 +12,7 @@
 import type {
   FocusSession, MoodLog, ProductivitySlot, Routine, Suggestion, SuggestionFeedback, Task, TaskTemplate, User,
 } from "./types";
+import { pad2 } from "./time";
 
 export interface Schema {
   version: number;
@@ -54,7 +55,15 @@ function backfill(raw: Partial<Schema>): Schema {
     routines: raw.routines ?? [],
     mood_logs: (raw.mood_logs ?? []).map((m) => {
       const l = m as Partial<MoodLog>;
-      return { ...m, tags: l.tags ?? [], linkedTaskIds: l.linkedTaskIds ?? [] };
+      const loggedAt = l.loggedAt ?? `${m.date}T${pad2(Math.floor(m.timeMin / 60))}:${pad2(m.timeMin % 60)}:00`;
+      return {
+        ...m,
+        tags: l.tags ?? [],
+        linkedTaskIds: l.linkedTaskIds ?? [],
+        source: l.source ?? "manual",
+        loggedAt,
+        updatedAt: l.updatedAt ?? loggedAt,
+      };
     }),
     focus_sessions: raw.focus_sessions ?? [],
     suggestions: raw.suggestions ?? [],
@@ -159,6 +168,12 @@ export const db = {
   updateMood(m: MoodLog) {
     const i = schema.mood_logs.findIndex((x) => x.id === m.id);
     if (i >= 0) schema.mood_logs[i] = m;
+  },
+  findMood(id: string): MoodLog | undefined {
+    return schema.mood_logs.find((m) => m.id === id);
+  },
+  removeMood(id: string) {
+    schema.mood_logs = schema.mood_logs.filter((m) => m.id !== id);
   },
 
   /* ---------- focus_sessions ---------- */

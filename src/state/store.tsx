@@ -18,6 +18,7 @@ import type {
   FocusSession, MoodLog, Routine, Suggestion, SyncLogLine, SyncState, TabId, Task, TaskStatus,
   TaskTemplate, Toast, ToastAction, User,
 } from "../lib/types";
+import { MoodRepository, type NewMoodInput } from "../features/mood/data/MoodRepository";
 
 interface AppState {
   booted: boolean;
@@ -32,6 +33,9 @@ interface AppState {
   syncLog: SyncLogLine[];
   tab: TabId;
   toasts: Toast[];
+  /* Mood Journal 2.1: глобальный Quick Check-In sheet */
+  checkInOpen: boolean;
+  checkInEditId: string | null;
 }
 
 const initial: AppState = {
@@ -47,6 +51,8 @@ const initial: AppState = {
   syncLog: [],
   tab: "today",
   toasts: [],
+  checkInOpen: false,
+  checkInEditId: null,
 };
 
 const DEFAULT_PREFS: User["notifications"] = {
@@ -87,8 +93,13 @@ interface Ctx extends AppState {
   setTaskStatus: (id: string, status: TaskStatus) => void;
   applyRoutine: (r: Routine) => { time: number } | null;
 
-  saveMood: (level: number, note?: string, tags?: string[]) => void;
-  updateMoodLog: (id: string, patch: Partial<Pick<MoodLog, "mood" | "note" | "tags" | "linkedTaskIds">>) => void;
+  saveMood: (input: NewMoodInput) => MoodLog | null;
+  updateMoodLog: (id: string, patch: Partial<Pick<MoodLog, "mood" | "note" | "tags" | "linkedTaskIds" | "date" | "timeMin">>) => void;
+  removeMoodLog: (id: string) => MoodLog | null;
+  restoreMoodLog: (entry: MoodLog) => void;
+  /* Quick Check-In sheet (Журнал 2.1) */
+  openCheckIn: (entryId?: string) => void;
+  closeCheckIn: () => void;
 
   logFocusSession: (s: Omit<FocusSession, "id" | "userId" | "date">) => void;
 
@@ -360,38 +371,52 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { time: start };
   }, [addTask]);
 
-  /* ---------- mood (Journal 2.0) ---------- */
-  const saveMood = useCallback((level: number, note?: string, tags?: string[]) => {
+  /* ---------- mood (Журнал 2.1, Фаза A) ----------
+   * Append-модель: каждый чек-ин — отдельная запись (разрешено несколько в день).
+   * «Состояние сегодня» = последняя запись дня (latestMoodOfDay). */
+  const saveMood = useCallback((input: NewMoodInput): MoodLog | null => {
     const u = stateRef.current.user!;
-    const today = todayKey();
-    const linkedTaskIds = db.tasksOf(u.id).filter((t) => t.date === today).map((t) => t.id);
-    const existing = db.moodsOf(u.id).find((m) => m.date === today);
-    if (existing) {
-      db.updateMood({
-        ...existing, mood: level,
-        note: note ?? existing.note,
-        tags: tags ?? existing.tags,
-        linkedTaskIds,
-        timeMin: nowMin(),
-      });
-    } else {
-      db.insertMood({
-        id: uid(), userId: u.id, date: today, timeMin: nowMin(),
-        mood: level, note, tags: tags ?? [], linkedTaskIds,
-      });
-    }
+    const date = input.date ?? todayKey();
+    const linkedTaskIds = db.tasksOf(u.id).filter((t) => t.date === date).map((t) => t.id);
+    const entry = MoodRepository.add(u.id, input, linkedTaskIds);
+    if (!entry) return null;
+    void db.commit();
+    refreshFromDb(u.id);
+    return entry;
+  }, [refreshFromDb]);
+
+  const updateMoodLog = useCallback((id: string, p: Partial<Pick<MoodLog, "mood" | "note" | "tags" | "linkedTaskIds" | "date" | "timeMin">>) => {
+    const u = stateRef.current.user!;
+    MoodRepository.update(id, p);
     void db.commit();
     refreshFromDb(u.id);
   }, [refreshFromDb]);
 
-  const updateMoodLog = useCallback((id: string, p: Partial<Pick<MoodLog, "mood" | "note" | "tags" | "linkedTaskIds">>) => {
+  const removeMoodLog = useCallback((id: string): MoodLog | null => {
     const u = stateRef.current.user!;
-    const m = db.moodsOf(u.id).find((x) => x.id === id);
-    if (!m) return;
-    db.updateMood({ ...m, ...p });
+    const removed = MoodRepository.remove(id);
+    if (removed) {
+      void db.commit();
+      refreshFromDb(u.id);
+    }
+    return removed;
+  }, [refreshFromDb]);
+
+  const restoreMoodLog = useCallback((entry: MoodLog) => {
+    const u = stateRef.current.user!;
+    MoodRepository.restore(entry);
     void db.commit();
     refreshFromDb(u.id);
   }, [refreshFromDb]);
+
+  /* ---------- Quick Check-In sheet ---------- */
+  const openCheckIn = useCallback((entryId?: string) => {
+    patch({ checkInOpen: true, checkInEditId: entryId ?? null });
+  }, [patch]);
+
+  const closeCheckIn = useCallback(() => {
+    patch({ checkInOpen: false, checkInEditId: null });
+  }, [patch]);
 
   /* ---------- flow sessions ---------- */
   const logFocusSession = useCallback((s: Omit<FocusSession, "id" | "userId" | "date">) => {
@@ -565,7 +590,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     toast, dismissToast, setTab: (t) => patch({ tab: t }),
     signIn, signUp, signInWith, signOut, updateUser,
     addTask, updateTask, removeTask, setTaskStatus, applyRoutine,
-    saveMood, updateMoodLog,
+    saveMood, updateMoodLog, removeMoodLog, restoreMoodLog, openCheckIn, closeCheckIn,
     logFocusSession,
     addTemplate, removeTemplate,
     pendingSuggestion, acceptSuggestion, dismissSuggestion, snoozeSuggestion, applyReschedule,
