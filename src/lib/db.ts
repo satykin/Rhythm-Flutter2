@@ -10,8 +10,8 @@
  * ============================================================ */
 
 import type {
-  FocusSession, MoodCorrelation, MoodLog, MoodPromptLog, MoodPromptSettings, ProductivitySlot, Routine,
-  Suggestion, SuggestionFeedback, Task, TaskTemplate, User,
+  FocusSession, MoodCorrelation, MoodInsightEvent, MoodInsightFeedback, MoodLog, MoodPromptLog, MoodPromptSettings,
+  ProductivitySlot, Routine, Suggestion, SuggestionFeedback, Task, TaskTemplate, User,
 } from "./types";
 import { pad2 } from "./time";
 
@@ -29,6 +29,8 @@ export interface Schema {
   user_mood_correlations: MoodCorrelation[];
   mood_prompt_settings: MoodPromptSettings[];
   mood_prompt_log: MoodPromptLog[];
+  mood_insight_feedback: MoodInsightFeedback[];
+  mood_insight_events: MoodInsightEvent[];
 }
 
 export interface StorageAdapter {
@@ -77,6 +79,8 @@ function backfill(raw: Partial<Schema>): Schema {
     user_mood_correlations: raw.user_mood_correlations ?? [],
     mood_prompt_settings: raw.mood_prompt_settings ?? [],
     mood_prompt_log: raw.mood_prompt_log ?? [],
+    mood_insight_feedback: raw.mood_insight_feedback ?? [],
+    mood_insight_events: raw.mood_insight_events ?? [],
   };
 }
 
@@ -105,6 +109,7 @@ let schema: Schema = {
   users: [], tasks: [], routines: [], mood_logs: [],
   focus_sessions: [], suggestions: [], suggestion_feedback: [], user_productivity_slots: [], task_templates: [],
   user_mood_correlations: [], mood_prompt_settings: [], mood_prompt_log: [],
+  mood_insight_feedback: [], mood_insight_events: [],
 };
 
 export const db = {
@@ -215,6 +220,25 @@ export const db = {
     schema.mood_prompt_log.push(l);
   },
 
+  /* ---------- mood_insight_feedback / mood_insight_events (Фаза E) ---------- */
+  insightFeedbackOf(userId: string): MoodInsightFeedback[] {
+    return schema.mood_insight_feedback.filter((f) => f.userId === userId);
+  },
+  /** Upsert по (userId, signalKey) — как primary key в SQL-схеме. */
+  upsertInsightFeedback(row: MoodInsightFeedback) {
+    const i = schema.mood_insight_feedback.findIndex(
+      (f) => f.userId === row.userId && f.signalKey === row.signalKey
+    );
+    if (i >= 0) schema.mood_insight_feedback[i] = row;
+    else schema.mood_insight_feedback.push(row);
+  },
+  insightEventsOf(userId: string): MoodInsightEvent[] {
+    return schema.mood_insight_events.filter((e) => e.userId === userId);
+  },
+  insertInsightEvent(e: MoodInsightEvent) {
+    schema.mood_insight_events.push(e);
+  },
+
   /* ---------- focus_sessions ---------- */
   focusSessionsOf(userId: string): FocusSession[] {
     return schema.focus_sessions.filter((s) => s.userId === userId);
@@ -279,6 +303,8 @@ export const db = {
     schema.user_mood_correlations = schema.user_mood_correlations.filter((c) => c.userId !== userId);
     schema.mood_prompt_settings = schema.mood_prompt_settings.filter((s) => s.userId !== userId);
     schema.mood_prompt_log = schema.mood_prompt_log.filter((l) => l.userId !== userId);
+    schema.mood_insight_feedback = schema.mood_insight_feedback.filter((f) => f.userId !== userId);
+    schema.mood_insight_events = schema.mood_insight_events.filter((e) => e.userId !== userId);
     await this.commit();
   },
 };

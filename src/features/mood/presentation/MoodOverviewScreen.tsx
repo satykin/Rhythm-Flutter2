@@ -11,12 +11,16 @@ import MoodTapestry from "./MoodTapestry";
 import MonthAnalytics from "./MonthAnalytics";
 import InsightsTab from "./InsightsTab";
 import PromptSettingsPanel from "./PromptSettingsPanel";
+import { useMoodCorrelations } from "./hooks/useMoodCorrelations";
 
 type Tab = "week" | "month" | "insights";
 
 export default function MoodOverviewScreen() {
   const [tab, setTab] = useState<Tab>("week");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /* Фаза C: пересчёт и сохранение корреляций — здесь, на уровне экрана.
+     Фаза E (InsightsTab) только читает сохранённое, не пересчитывая. */
+  useMoodCorrelations();
 
   return (
     <div className="mx-auto max-w-[820px] space-y-5">

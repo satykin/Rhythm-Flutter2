@@ -255,6 +255,32 @@ export type CorrelationDirection = "up" | "down" | "flat";
  * Сохранённая корреляция настроения с сигналом.
  * Полные объясняемые поля нужны для «Почему я это вижу?» (Фаза E).
  */
+/* ---------- Mood Insights: feedback и события (Фаза E) ---------- */
+
+export type InsightStatus = "active" | "accepted" | "dismissed" | "stale";
+export type InsightEventType = "shown" | "explain_opened" | "accepted" | "dismissed";
+
+/** mood_insight_feedback — состояние инсайта по (user_id, signal_key). */
+export interface MoodInsightFeedback {
+  userId: string;
+  signalKey: string;
+  status: InsightStatus;
+  /** epoch ms первого показа; null — инсайт ещё не показывался («новый») */
+  firstShownAt: number | null;
+  feedbackAt: number | null;
+  /** отклонён до этого момента (now + 14 дней) */
+  dismissedUntil: number | null;
+}
+
+/** mood_insight_events — журнал событий для метрик доверия. */
+export interface MoodInsightEvent {
+  id: string;
+  userId: string;
+  signalKey: string;
+  event: InsightEventType;
+  createdAt: number;
+}
+
 export interface MoodCorrelation {
   userId: string;
   /** 'tag:exercise' | 'weekday:mon' | 'habit:<id>' | 'num:focus_minutes' */

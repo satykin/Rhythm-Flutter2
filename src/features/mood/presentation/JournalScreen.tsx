@@ -12,6 +12,7 @@ import { moodLabel } from "../domain/moodService";
 import { minToHM } from "../../../lib/time";
 import type { MoodLog } from "../../../lib/types";
 import DetailView from "./DetailView";
+import NewInsightBanner from "./NewInsightBanner";
 
 const SOURCE_LABEL: Record<MoodLog["source"], string> = {
   manual: "вручную",
@@ -50,6 +51,9 @@ export default function JournalScreen() {
 
   return (
     <div className="mx-auto max-w-[720px] space-y-5">
+      {/* мягкое проактивное появление нового инсайта (Фаза E, §8) */}
+      <NewInsightBanner />
+
       {/* шапка + поиск */}
       <section className="anim-rise flex flex-wrap items-center justify-between gap-3">
         <div>
