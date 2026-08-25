@@ -6,6 +6,8 @@ import type { TabId, TaskColor, Toast } from "../lib/types";
 import { fmtClock, fmtDateLong, hmToMin, minToHM, todayKey, plural } from "../lib/time";
 import { COLOR_NAMES, initials, PALETTE_LIST, TASK_COLORS } from "../lib/palette";
 import { NOTIF_META, notify } from "../features/notify/notify";
+import { useMoodPrompts } from "../features/mood/presentation/hooks/useMoodPrompts";
+import MoodPromptCard from "../features/mood/presentation/MoodPromptCard";
 
 const NOTIF_KEYS = Object.keys(NOTIF_META) as (keyof typeof NOTIF_META)[];
 
@@ -530,6 +532,15 @@ export default function Shell({
         </header>
 
         <main className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 pb-24 sm:px-6 lg:pb-6">
+          {prompts.activePrompt && (tab === "today" || tab === "journal" || tab === "mood") && (
+            <div className="mx-auto mb-5 w-full max-w-[640px]">
+              <MoodPromptCard
+                type={prompts.activePrompt}
+                onOpen={() => prompts.openPromptCheckIn(prompts.activePrompt!)}
+                onDismiss={prompts.dismissPrompt}
+              />
+            </div>
+          )}
           {children}
         </main>
 
