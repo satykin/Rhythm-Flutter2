@@ -10,7 +10,7 @@
  * ============================================================ */
 
 import type {
-  FocusSession, MoodLog, ProductivitySlot, Routine, Suggestion, SuggestionFeedback, Task, TaskTemplate, User,
+  FocusSession, MoodCorrelation, MoodLog, ProductivitySlot, Routine, Suggestion, SuggestionFeedback, Task, TaskTemplate, User,
 } from "./types";
 import { pad2 } from "./time";
 
@@ -25,6 +25,7 @@ export interface Schema {
   suggestion_feedback: SuggestionFeedback[];
   user_productivity_slots: ProductivitySlot[];
   task_templates: TaskTemplate[];
+  user_mood_correlations: MoodCorrelation[];
 }
 
 export interface StorageAdapter {
@@ -70,6 +71,7 @@ function backfill(raw: Partial<Schema>): Schema {
     suggestion_feedback: raw.suggestion_feedback ?? [],
     user_productivity_slots: raw.user_productivity_slots ?? [],
     task_templates: raw.task_templates ?? [],
+    user_mood_correlations: raw.user_mood_correlations ?? [],
   };
 }
 
@@ -97,6 +99,7 @@ let schema: Schema = {
   version: SCHEMA_VERSION,
   users: [], tasks: [], routines: [], mood_logs: [],
   focus_sessions: [], suggestions: [], suggestion_feedback: [], user_productivity_slots: [], task_templates: [],
+  user_mood_correlations: [],
 };
 
 export const db = {
@@ -176,6 +179,21 @@ export const db = {
     schema.mood_logs = schema.mood_logs.filter((m) => m.id !== id);
   },
 
+  /* ---------- user_mood_correlations (Фаза C) ---------- */
+  correlationsOf(userId: string): MoodCorrelation[] {
+    return schema.user_mood_correlations.filter((c) => c.userId === userId);
+  },
+  /** Upsert по (userId, signalKey) — как primary key в SQL-схеме. */
+  upsertCorrelations(userId: string, rows: MoodCorrelation[]) {
+    schema.user_mood_correlations = schema.user_mood_correlations.filter(
+      (c) => !(c.userId === userId && rows.some((r) => r.signalKey === c.signalKey))
+    );
+    schema.user_mood_correlations.push(...rows);
+  },
+  clearCorrelations(userId: string) {
+    schema.user_mood_correlations = schema.user_mood_correlations.filter((c) => c.userId !== userId);
+  },
+
   /* ---------- focus_sessions ---------- */
   focusSessionsOf(userId: string): FocusSession[] {
     return schema.focus_sessions.filter((s) => s.userId === userId);
@@ -237,6 +255,7 @@ export const db = {
     schema.suggestion_feedback = schema.suggestion_feedback.filter((f) => f.userId !== userId);
     schema.user_productivity_slots = schema.user_productivity_slots.filter((s) => s.userId !== userId);
     schema.task_templates = schema.task_templates.filter((t) => t.userId !== userId);
+    schema.user_mood_correlations = schema.user_mood_correlations.filter((c) => c.userId !== userId);
     await this.commit();
   },
 };

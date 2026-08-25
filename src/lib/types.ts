@@ -214,6 +214,32 @@ export interface TaskTemplate {
   timeHint?: string;
 }
 
+/* ---------- Mood Journal 2.1 · Фаза C (user_mood_correlations) ---------- */
+
+export type CorrelationSignalType = "categorical" | "numeric";
+export type CorrelationConfidence = "low" | "medium" | "high";
+export type CorrelationDirection = "up" | "down" | "flat";
+
+/**
+ * Сохранённая корреляция настроения с сигналом.
+ * Полные объясняемые поля нужны для «Почему я это вижу?» (Фаза E).
+ */
+export interface MoodCorrelation {
+  userId: string;
+  /** 'tag:exercise' | 'weekday:mon' | 'habit:<id>' | 'num:focus_minutes' */
+  signalKey: string;
+  signalType: CorrelationSignalType;
+  /** '30d' */
+  period: string;
+  sampleSize: number;
+  baseline: number;
+  observedValue: number;
+  effectSize: number;
+  confidence: CorrelationConfidence;
+  direction: CorrelationDirection;
+  computedAt: number;
+}
+
 /* ---------- синхронизация с внешним календарём ---------- */
 
 export interface ExternalEvent {
@@ -242,7 +268,7 @@ export interface SyncLogLine {
 
 /* ---------- UI ---------- */
 
-export type TabId = "today" | "flow" | "rhythm" | "journal" | "character" | "together" | "insights";
+export type TabId = "today" | "flow" | "rhythm" | "journal" | "mood" | "character" | "together" | "insights";
 
 export interface ToastAction {
   label: string;

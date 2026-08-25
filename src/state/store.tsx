@@ -376,14 +376,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    * «Состояние сегодня» = последняя запись дня (latestMoodOfDay). */
   const saveMood = useCallback((input: NewMoodInput): MoodLog | null => {
     const u = stateRef.current.user!;
-    const date = input.date ?? todayKey();
-    /* Автопривязка (Фаза B): только задачи в окне ±30 мин от logged_at, только при создании. */
-    const at = input.timeMin ?? nowMin();
-    const linkedTaskIds = db
-      .tasksOf(u.id)
-      .filter((t) => t.date === date && Math.abs(t.startMin - at) <= 30)
-      .map((t) => t.id);
-    const entry = MoodRepository.add(u.id, input, linkedTaskIds);
+    /* Связи — только те, что пользователь явно подтвердил (спека §7:
+     * система предлагает, пользователь выбирает). Никакой тихой автопривязки. */
+    const entry = MoodRepository.add(u.id, input, input.linkedTaskIds ?? []);
     if (!entry) return null;
     void db.commit();
     refreshFromDb(u.id);

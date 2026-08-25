@@ -213,6 +213,38 @@ export default function MoodCheckInSheet() {
                 </div>
               </div>
 
+              {/* связи с задачами: система предлагает (±30 мин), пользователь подтверждает (§7) */}
+              {(f.suggestedTasks.length > 0 || f.linkedTasks.length > 0) && (
+                <div>
+                  <span className="label">С задачами · {f.linkedTaskIds.length}</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {f.linkedTasks.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => f.toggleLink(t.id)}
+                        title="Отвязать задачу"
+                        className="chip cursor-pointer !border-aqua-400/45 !bg-aqua-400/12 !text-aqua-300 transition hover:!bg-bad/15 hover:!text-bad hover:!border-bad/40"
+                      >
+                        <I n="check" size={9} /> {t.title.length > 20 ? `${t.title.slice(0, 20)}…` : t.title}
+                      </button>
+                    ))}
+                    {f.suggestedTasks.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => f.toggleLink(t.id)}
+                        title={`Привязать «${t.title}» (в ${minToHM(t.startMin)})`}
+                        className="chip cursor-pointer transition hover:!border-vio-400/45 hover:!bg-vio-400/12 hover:!text-vio-300"
+                      >
+                        <I n="plus" size={9} /> {t.title.length > 20 ? `${t.title.slice(0, 20)}…` : t.title}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[10px] font-semibold text-mist-500">Рядом по времени — тапни, чтобы связать</p>
+                </div>
+              )}
+
               {/* время (редактируемое для manual entry) */}
               <div className="grid grid-cols-2 gap-2">
                 <div>

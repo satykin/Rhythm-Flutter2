@@ -15,6 +15,8 @@ export interface NewMoodInput {
   tags?: string[];
   source?: MoodSource;
   focusSessionId?: string;
+  /** явно подтверждённые пользователем связи с задачами (uuid[]) */
+  linkedTaskIds?: string[];
   /** редактируемое время для manual entry (по умолчанию — сейчас) */
   date?: string;
   timeMin?: number;
