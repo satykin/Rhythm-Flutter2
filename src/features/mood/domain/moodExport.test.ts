@@ -95,7 +95,9 @@ describe("CSV", () => {
     const many = Array.from({ length: 1200 }, (_, i) => mood({ id: `m${i}` }));
     const parts = buildCsvParts(many, buildJoin([], []), 500);
     expect(parts.length).toBeGreaterThan(2);
-    expect(parts.join("").split("\r\n").length).toBe(1201); // шапка + 1200 строк
+    // filter(Boolean): каждая строка завершается \r\n, поэтому split даёт
+    // завершающий пустой элемент — считаем только непустые (шапка + 1200 строк).
+    expect(parts.join("").split("\r\n").filter(Boolean).length).toBe(1201);
   });
 
   it("имя файла включает диапазон дат или дату экспорта", () => {
