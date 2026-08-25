@@ -402,6 +402,8 @@ export default function Shell({
   const { tab, user, sync } = app;
   const [settings, setSettings] = useState(false);
   const [clock, setClock] = useState(fmtClock());
+  /* Планировщик промптов (Фаза D): живёт в Shell, чтобы тикать на любой вкладке. */
+  const prompts = useMoodPrompts();
 
   useEffect(() => {
     const t = window.setInterval(() => setClock(fmtClock()), 10_000);

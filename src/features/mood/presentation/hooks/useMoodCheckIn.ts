@@ -58,11 +58,12 @@ export function useMoodCheckIn() {
       setDate(todayKey());
       setTime(minToHM(nowMin()));
       setLinkedTaskIds([]);
-      setDetailsOpen(false);
+      /* Вечерний промпт сразу раскрывает заметку (но она всё равно опциональна). */
+      setDetailsOpen(app.checkInOpenNote);
     }
     setTagInput("");
     setSaving(false);
-  }, [app.checkInOpen, editing]);
+  }, [app.checkInOpen, app.checkInOpenNote, editing]);
 
   /* Предложенные задачи (рядом по времени), ещё не привязанные. */
   const suggestedTasks = useMemo(() => {
@@ -113,7 +114,8 @@ export function useMoodCheckIn() {
         mood,
         note: cleanNote || undefined,
         tags: cleanTags,
-        source: "manual",
+        /* source из промпта (morning/evening) либо manual */
+        source: app.checkInSource ?? "manual",
         date,
         timeMin,
         linkedTaskIds,
@@ -125,6 +127,7 @@ export function useMoodCheckIn() {
 
   return {
     editing,
+    source: app.checkInSource,
     mood,
     setMood,
     note,

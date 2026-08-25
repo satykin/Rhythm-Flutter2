@@ -109,6 +109,37 @@ export interface MoodLog {
   updatedAt: string;
 }
 
+/* ---------- Mood Prompts / Prompt Budget (Фаза D) ---------- */
+
+export type PromptType = "morning" | "evening";
+export type PromptAction = "shown" | "dismissed" | "completed";
+
+/** mood_prompt_settings (1 строка на пользователя, PK = user_id) */
+export interface MoodPromptSettings {
+  userId: string;
+  morningEnabled: boolean;
+  /** минуты от полуночи (локальное) */
+  morningTime: number;
+  eveningEnabled: boolean;
+  eveningTime: number;
+  /** тихие часы; поддерживают переход через полночь (start > end) */
+  quietStart: number;
+  quietEnd: number;
+  /** не напоминать, если недавно уже был ручной check-in */
+  skipIfRecentCheckin: boolean;
+  updatedAt: string;
+}
+
+/** mood_prompt_log — для бюджета и аналитики */
+export interface MoodPromptLog {
+  id: string;
+  userId: string;
+  promptType: PromptType;
+  action: PromptAction;
+  /** epoch ms — абсолютный момент (аналог timestamptz) */
+  createdAt: number;
+}
+
 /* ---------- Flow Sessions (focus_sessions) ---------- */
 
 export type FlowType = "deep" | "creative" | "light" | "rest";

@@ -15,10 +15,12 @@ import { productivityWindows } from "../features/suggestions/suggestionService";
 import { runScheduler } from "../features/suggestions/SuggestionScheduler";
 import { startScheduler, registerWorker } from "../features/notify/notify";
 import type {
-  FocusSession, MoodLog, Routine, Suggestion, SyncLogLine, SyncState, TabId, Task, TaskStatus,
-  TaskTemplate, Toast, ToastAction, User,
+  FocusSession, MoodLog, MoodPromptSettings, MoodSource, PromptType, Routine, Suggestion, SyncLogLine,
+  SyncState, TabId, Task, TaskStatus, TaskTemplate, Toast, ToastAction, User,
 } from "../lib/types";
 import { MoodRepository, type NewMoodInput } from "../features/mood/data/MoodRepository";
+import { MoodPromptRepository } from "../features/mood/data/MoodPromptRepository";
+import { pickPrompt } from "../features/mood/domain/promptBudget";
 
 interface AppState {
   booted: boolean;
@@ -36,6 +38,13 @@ interface AppState {
   /* Mood Journal 2.1: глобальный Quick Check-In sheet */
   checkInOpen: boolean;
   checkInEditId: string | null;
+  /** source записи, если чек-ин открыт из промпта (Фаза D) */
+  checkInSource: MoodSource | null;
+  /** раскрыть ли заметку сразу (вечерний промпт) */
+  checkInOpenNote: boolean;
+  /* Mood Prompts (Фаза D) */
+  promptSettings: MoodPromptSettings | null;
+  activePrompt: PromptType | null;
 }
 
 const initial: AppState = {
@@ -53,6 +62,10 @@ const initial: AppState = {
   toasts: [],
   checkInOpen: false,
   checkInEditId: null,
+  checkInSource: null,
+  checkInOpenNote: false,
+  promptSettings: null,
+  activePrompt: null,
 };
 
 const DEFAULT_PREFS: User["notifications"] = {
@@ -98,8 +111,13 @@ interface Ctx extends AppState {
   removeMoodLog: (id: string) => MoodLog | null;
   restoreMoodLog: (entry: MoodLog) => void;
   /* Quick Check-In sheet (Журнал 2.1) */
-  openCheckIn: (entryId?: string) => void;
+  openCheckIn: (entryId?: string, opts?: { source?: MoodSource; openNote?: boolean }) => void;
   closeCheckIn: () => void;
+
+  /* Mood Prompts (Фаза D) */
+  evaluatePrompts: () => void;
+  dismissPrompt: () => void;
+  savePromptSettings: (patch: Partial<Omit<MoodPromptSettings, "userId" | "updatedAt">>) => void;
 
   logFocusSession: (s: Omit<FocusSession, "id" | "userId" | "date">) => FocusSession;
 
@@ -181,6 +199,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       templates: db.templatesOf(userId),
       suggestions,
       focusSessions: db.focusSessionsOf(userId),
+      promptSettings: MoodPromptRepository.getSettings(userId),
     });
   }, [materializeRecurrences, patch]);
 
@@ -380,10 +399,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
      * система предлагает, пользователь выбирает). Никакой тихой автопривязки. */
     const entry = MoodRepository.add(u.id, input, input.linkedTaskIds ?? []);
     if (!entry) return null;
+    /* Если запись создана из промпта — логируем completed и гасим карточку. */
+    const active = stateRef.current.activePrompt;
+    if (active && (entry.source === "morning" || entry.source === "evening") && entry.source === active) {
+      MoodPromptRepository.log(u.id, active, "completed");
+      patch({ activePrompt: null });
+    }
     void db.commit();
     refreshFromDb(u.id);
     return entry;
-  }, [refreshFromDb]);
+  }, [patch, refreshFromDb]);
 
   const updateMoodLog = useCallback((id: string, p: Partial<Pick<MoodLog, "mood" | "note" | "tags" | "linkedTaskIds" | "date" | "timeMin">>) => {
     const u = stateRef.current.user!;
@@ -410,12 +435,56 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [refreshFromDb]);
 
   /* ---------- Quick Check-In sheet ---------- */
-  const openCheckIn = useCallback((entryId?: string) => {
-    patch({ checkInOpen: true, checkInEditId: entryId ?? null });
+  const openCheckIn = useCallback((entryId?: string, opts?: { source?: MoodSource; openNote?: boolean }) => {
+    patch({
+      checkInOpen: true,
+      checkInEditId: entryId ?? null,
+      checkInSource: opts?.source ?? null,
+      checkInOpenNote: opts?.openNote ?? false,
+    });
   }, [patch]);
 
   const closeCheckIn = useCallback(() => {
-    patch({ checkInOpen: false, checkInEditId: null });
+    patch({ checkInOpen: false, checkInEditId: null, checkInSource: null, checkInOpenNote: false });
+  }, [patch]);
+
+  /* ---------- Mood Prompts (Фаза D) ---------- */
+  /** Пересчёт: положен ли промпт прямо сейчас? (идемпотентно, не чаще 1 активного) */
+  const evaluatePrompts = useCallback(() => {
+    const st = stateRef.current;
+    const u = st.user;
+    if (!u) return;
+    if (st.activePrompt || st.checkInOpen) return; // уже активен — не дублируем
+    const settings = MoodPromptRepository.getSettings(u.id);
+    const pSettings = MoodPromptRepository.toPromptSettings(settings);
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const state = MoodPromptRepository.computeBudgetState(u.id, Date.now());
+    const next = pickPrompt(nowMin, Date.now(), pSettings, state);
+    if (next) {
+      MoodPromptRepository.log(u.id, next, "shown");
+      void db.commit();
+      patch({ activePrompt: next });
+    }
+  }, [patch]);
+
+  /** «Не сейчас» — пишем dismissed, скрываем, тип сегодня больше не показывается. */
+  const dismissPrompt = useCallback(() => {
+    const st = stateRef.current;
+    const u = st.user;
+    const type = st.activePrompt;
+    if (!u || !type) return;
+    MoodPromptRepository.log(u.id, type, "dismissed");
+    void db.commit();
+    patch({ activePrompt: null });
+  }, [patch]);
+
+  const savePromptSettings = useCallback((p: Partial<Omit<MoodPromptSettings, "userId" | "updatedAt">>) => {
+    const u = stateRef.current.user;
+    if (!u) return;
+    const next = MoodPromptRepository.saveSettings(u.id, p);
+    void db.commit();
+    patch({ promptSettings: next });
   }, [patch]);
 
   /* ---------- flow sessions ---------- */
@@ -593,6 +662,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     signIn, signUp, signInWith, signOut, updateUser,
     addTask, updateTask, removeTask, setTaskStatus, applyRoutine,
     saveMood, updateMoodLog, removeMoodLog, restoreMoodLog, openCheckIn, closeCheckIn,
+    evaluatePrompts, dismissPrompt, savePromptSettings,
     logFocusSession,
     addTemplate, removeTemplate,
     pendingSuggestion, acceptSuggestion, dismissSuggestion, snoozeSuggestion, applyReschedule,

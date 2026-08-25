@@ -100,7 +100,7 @@ export default function MoodCheckInSheet() {
         <div className="flex items-center justify-between border-b border-white/6 px-5 py-4">
           <div>
             <h2 className="font-display text-[15px] font-semibold tracking-tight text-mist-50">
-              {f.editing ? "Редактировать запись" : "Как ты сейчас?"}
+              {f.editing ? "Редактировать запись" : f.source === "morning" ? "Как ты этим утром?" : f.source === "evening" ? "Как прошёл день?" : "Как ты сейчас?"}
             </h2>
             <p className="mt-0.5 text-[11px] font-semibold text-mist-500">
               {f.editing ? "Состояние — сигнал, а не оценка" : "Настроение — сигнал, а не оценка"}

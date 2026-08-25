@@ -10,7 +10,8 @@
  * ============================================================ */
 
 import type {
-  FocusSession, MoodCorrelation, MoodLog, ProductivitySlot, Routine, Suggestion, SuggestionFeedback, Task, TaskTemplate, User,
+  FocusSession, MoodCorrelation, MoodLog, MoodPromptLog, MoodPromptSettings, ProductivitySlot, Routine,
+  Suggestion, SuggestionFeedback, Task, TaskTemplate, User,
 } from "./types";
 import { pad2 } from "./time";
 
@@ -26,6 +27,8 @@ export interface Schema {
   user_productivity_slots: ProductivitySlot[];
   task_templates: TaskTemplate[];
   user_mood_correlations: MoodCorrelation[];
+  mood_prompt_settings: MoodPromptSettings[];
+  mood_prompt_log: MoodPromptLog[];
 }
 
 export interface StorageAdapter {
@@ -72,6 +75,8 @@ function backfill(raw: Partial<Schema>): Schema {
     user_productivity_slots: raw.user_productivity_slots ?? [],
     task_templates: raw.task_templates ?? [],
     user_mood_correlations: raw.user_mood_correlations ?? [],
+    mood_prompt_settings: raw.mood_prompt_settings ?? [],
+    mood_prompt_log: raw.mood_prompt_log ?? [],
   };
 }
 
@@ -99,7 +104,7 @@ let schema: Schema = {
   version: SCHEMA_VERSION,
   users: [], tasks: [], routines: [], mood_logs: [],
   focus_sessions: [], suggestions: [], suggestion_feedback: [], user_productivity_slots: [], task_templates: [],
-  user_mood_correlations: [],
+  user_mood_correlations: [], mood_prompt_settings: [], mood_prompt_log: [],
 };
 
 export const db = {
@@ -194,6 +199,22 @@ export const db = {
     schema.user_mood_correlations = schema.user_mood_correlations.filter((c) => c.userId !== userId);
   },
 
+  /* ---------- mood_prompt_settings / mood_prompt_log (Фаза D) ---------- */
+  promptSettingsOf(userId: string): MoodPromptSettings | undefined {
+    return schema.mood_prompt_settings.find((s) => s.userId === userId);
+  },
+  upsertPromptSettings(s: MoodPromptSettings) {
+    const i = schema.mood_prompt_settings.findIndex((x) => x.userId === s.userId);
+    if (i >= 0) schema.mood_prompt_settings[i] = s;
+    else schema.mood_prompt_settings.push(s);
+  },
+  promptLogOf(userId: string): MoodPromptLog[] {
+    return schema.mood_prompt_log.filter((l) => l.userId === userId);
+  },
+  insertPromptLog(l: MoodPromptLog) {
+    schema.mood_prompt_log.push(l);
+  },
+
   /* ---------- focus_sessions ---------- */
   focusSessionsOf(userId: string): FocusSession[] {
     return schema.focus_sessions.filter((s) => s.userId === userId);
@@ -256,6 +277,8 @@ export const db = {
     schema.user_productivity_slots = schema.user_productivity_slots.filter((s) => s.userId !== userId);
     schema.task_templates = schema.task_templates.filter((t) => t.userId !== userId);
     schema.user_mood_correlations = schema.user_mood_correlations.filter((c) => c.userId !== userId);
+    schema.mood_prompt_settings = schema.mood_prompt_settings.filter((s) => s.userId !== userId);
+    schema.mood_prompt_log = schema.mood_prompt_log.filter((l) => l.userId !== userId);
     await this.commit();
   },
 };

@@ -9,6 +9,7 @@ import TogetherScreen from "./components/TogetherScreen";
 import FlowScreen from "./features/flow/FlowScreen";
 import JournalScreen from "./features/mood/presentation/JournalScreen";
 import MoodCheckInSheet from "./features/mood/presentation/MoodCheckInSheet";
+import MoodOverviewScreen from "./features/mood/presentation/MoodOverviewScreen";
 import InsightsScreen from "./features/insights/InsightsScreen";
 import TaskModal, { TaskDraft } from "./components/TaskModal";
 import { LogoMark } from "./components/icons";
@@ -37,7 +38,7 @@ function Splash() {
 }
 
 const KEY_TABS: Record<string, TabId> = {
-  t: "today", f: "flow", r: "rhythm", j: "journal", c: "character", g: "together", i: "insights",
+  t: "today", f: "flow", r: "rhythm", j: "journal", o: "mood", c: "character", g: "together", i: "insights",
 };
 
 function Body() {
@@ -81,6 +82,7 @@ function Body() {
         {app.tab === "flow" && <FlowScreen />}
         {app.tab === "rhythm" && <RhythmScreen onPlanSlot={(start, end) => openNew({ date: todayKey(), startMin: start, endMin: end })} />}
         {app.tab === "journal" && <JournalScreen />}
+        {app.tab === "mood" && <MoodOverviewScreen />}
         {app.tab === "character" && <CharacterScreen />}
         {app.tab === "together" && <TogetherScreen />}
         {app.tab === "insights" && <InsightsScreen />}
