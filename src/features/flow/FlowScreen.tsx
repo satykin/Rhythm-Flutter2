@@ -11,12 +11,13 @@
  * ============================================================ */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { I, iconOf, MoodFace, type IconName } from "../../components/icons";
+import { I, iconOf, type IconName } from "../../components/icons";
 import { Modal } from "../../components/ui";
 import { useApp } from "../../state/store";
 import { ambient, AMBIENTS, MAX_LAYERS, type AmbientId } from "./audio";
 import { clearFlowLink, readFlowLink } from "./flowLink";
 import { notify } from "../notify/notify";
+import MoodFacePicker from "../mood/presentation/MoodFacePicker";
 import { db } from "../../lib/db";
 import { energyAt } from "../../lib/rhythm";
 import { addDaysKey, clamp, fmtDur, minToHM, nowMin, todayKey } from "../../lib/time";
@@ -163,6 +164,8 @@ export default function FlowScreen() {
   const pendingNextRef = useRef(false);
   const startedAtRef = useRef("");
   const abortLeftoverRef = useRef(0);
+  /* id записанной focus-сессии — для post-focus чек-ина (Фаза B) */
+  const sessionRef = useRef<string | undefined>(undefined);
   const titleRef = useRef(typeof document !== "undefined" ? document.title : "Rhythm");
   const hideT = useRef(0);
   const previewT = useRef<number[]>([]);
@@ -208,7 +211,7 @@ export default function FlowScreen() {
     (completed: boolean) => {
       const acc = accRef.current;
       if (acc.focusSec < 60) return; // < 1 минуты — не попадает в статистику (спека §10)
-      app.logFocusSession({
+      const session = app.logFocusSession({
         startedAt: startedAtRef.current || new Date().toISOString(),
         type: typeRef.current,
         plannedFocusMin: typeRef.current === "rest" ? FLOW_CFG.rest.focusMin : durRef.current,
@@ -219,6 +222,7 @@ export default function FlowScreen() {
         completed,
         sounds: ambient.active(),
       });
+      sessionRef.current = session.id;
     },
     [app]
   );
@@ -1015,23 +1019,29 @@ export default function FlowScreen() {
           </div>
           {!moodPicked ? (
             <div className="card w-full p-3.5">
-              <p className="label !mb-2 text-center">Как ты после фокуса?</p>
-              <div className="flex justify-center gap-4">
-                {([1, 3, 5] as const).map((lv) => (
-                  <button
-                    key={lv}
-                    className="transition-transform hover:scale-110 active:scale-95"
-                    aria-label={`Настроение ${lv} из 5`}
-                    onClick={() => {
-                      app.saveMood({ mood: lv, note: `после Flow: ${cfg.label}`, tags: ["фокус"] });
-                      setMoodPicked(true);
-                      app.toast("success", "Настроение записано в журнал");
-                    }}
-                  >
-                    <MoodFace level={lv} size={34} active={false} />
-                  </button>
-                ))}
-              </div>
+              <p className="label !mb-2 text-center">Как ты после фокуса? (опционально)</p>
+              <MoodFacePicker
+                value={null}
+                showLabels={false}
+                onChange={(lv) => {
+                  /* Post-focus: source='post_focus', связь с сессией, НЕ входит в Prompt Budget. */
+                  app.saveMood({
+                    mood: lv,
+                    note: `после Flow: ${cfg.label}`,
+                    tags: ["фокус"],
+                    source: "post_focus",
+                    focusSessionId: sessionRef.current,
+                  });
+                  setMoodPicked(true);
+                  app.toast("success", "Настроение записано в журнал");
+                }}
+              />
+              <button
+                className="mx-auto mt-1 block text-[11px] font-bold text-mist-500 transition hover:text-mist-300"
+                onClick={() => setMoodPicked(true)}
+              >
+                Пропустить
+              </button>
             </div>
           ) : (
             <p className="flex items-center gap-1.5 text-[12px] font-semibold text-aqua-300">

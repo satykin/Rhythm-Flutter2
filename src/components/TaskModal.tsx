@@ -4,6 +4,7 @@ import { Field, Modal, Seg } from "./ui";
 import { useApp } from "../state/store";
 import { COLOR_NAMES, TASK_COLORS, TASK_ICONS } from "../lib/palette";
 import { RECURRENCE_PRESETS } from "../features/timeline/recurrence";
+import { durationHint, bestTimeHint } from "../features/suggestions/domain/SuggestionEngine";
 import { clamp, fmtDur, hmToMin, minToHM, snap, todayKey } from "../lib/time";
 import type { EnergyLevel, Task, TaskColor, TaskTemplate } from "../lib/types";
 import { DAY_END, DAY_START } from "../lib/time";

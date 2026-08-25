@@ -161,6 +161,9 @@ input[type="time"].input, input[type="date"].input { color-scheme: dark; }
 @keyframes xpgrow { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .anim-xp { animation: xpgrow 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
+@keyframes sheetup { from { opacity: 0; transform: translateY(48px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.sheet-up { animation: sheetup 0.38s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
 .anim-rise { animation: rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .anim-pop { animation: pop 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .anim-fade { animation: fadein 0.3s ease both; }

@@ -101,7 +101,7 @@ interface Ctx extends AppState {
   openCheckIn: (entryId?: string) => void;
   closeCheckIn: () => void;
 
-  logFocusSession: (s: Omit<FocusSession, "id" | "userId" | "date">) => void;
+  logFocusSession: (s: Omit<FocusSession, "id" | "userId" | "date">) => FocusSession;
 
   addTemplate: (t: Omit<TaskTemplate, "id" | "userId">) => void;
   removeTemplate: (id: string) => void;
@@ -377,7 +377,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const saveMood = useCallback((input: NewMoodInput): MoodLog | null => {
     const u = stateRef.current.user!;
     const date = input.date ?? todayKey();
-    const linkedTaskIds = db.tasksOf(u.id).filter((t) => t.date === date).map((t) => t.id);
+    /* Автопривязка (Фаза B): только задачи в окне ±30 мин от logged_at, только при создании. */
+    const at = input.timeMin ?? nowMin();
+    const linkedTaskIds = db
+      .tasksOf(u.id)
+      .filter((t) => t.date === date && Math.abs(t.startMin - at) <= 30)
+      .map((t) => t.id);
     const entry = MoodRepository.add(u.id, input, linkedTaskIds);
     if (!entry) return null;
     void db.commit();
@@ -419,11 +424,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [patch]);
 
   /* ---------- flow sessions ---------- */
-  const logFocusSession = useCallback((s: Omit<FocusSession, "id" | "userId" | "date">) => {
+  const logFocusSession = useCallback((s: Omit<FocusSession, "id" | "userId" | "date">): FocusSession => {
     const u = stateRef.current.user!;
-    db.insertFocusSession({ ...s, id: uid(), userId: u.id, date: s.startedAt.slice(0, 10) });
+    const session: FocusSession = { ...s, id: uid(), userId: u.id, date: s.startedAt.slice(0, 10) };
+    db.insertFocusSession(session);
     void db.commit();
     refreshFromDb(u.id);
+    return session;
   }, [refreshFromDb]);
 
   /* ---------- templates ---------- */

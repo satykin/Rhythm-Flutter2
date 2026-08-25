@@ -4,13 +4,14 @@
  * редактирование и удаление (Undo). Аналитика — отдельно (Фаза C).
  * ============================================================ */
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { I, MoodFace } from "../../../components/icons";
 import { useApp } from "../../../state/store";
 import { useMoodEntries } from "./hooks/useMoodEntries";
 import { moodLabel } from "../domain/moodService";
 import { minToHM } from "../../../lib/time";
 import type { MoodLog } from "../../../lib/types";
+import DetailView from "./DetailView";
 
 const SOURCE_LABEL: Record<MoodLog["source"], string> = {
   manual: "вручную",
@@ -23,6 +24,13 @@ export default function JournalScreen() {
   const app = useApp();
   const j = useMoodEntries();
   const [armedDelete, setArmedDelete] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
+
+  /* Запись для Detail View (ищется по id, чтобы правки отражались live). */
+  const detailEntry = useMemo(
+    () => (detailId ? app.moods.find((m) => m.id === detailId) ?? null : null),
+    [detailId, app.moods]
+  );
 
   const doDelete = (m: MoodLog) => {
     const needsConfirm = Boolean(m.note) || m.linkedTaskIds.length > 0;
@@ -98,6 +106,7 @@ export default function JournalScreen() {
                 key={m.id}
                 m={m}
                 armed={armedDelete === m.id}
+                onOpen={() => setDetailId(m.id)}
                 onEdit={() => app.openCheckIn(m.id)}
                 onDelete={() => doDelete(m)}
               />
@@ -114,6 +123,9 @@ export default function JournalScreen() {
           </button>
         </div>
       )}
+
+      {/* Detail View (Фаза B) */}
+      <DetailView entry={detailEntry} onClose={() => setDetailId(null)} onOpenEntry={(id) => setDetailId(id)} />
     </div>
   );
 }
@@ -121,16 +133,30 @@ export default function JournalScreen() {
 function EntryRow({
   m,
   armed,
+  onOpen,
   onEdit,
   onDelete,
 }: {
   m: MoodLog;
   armed: boolean;
+  onOpen: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   return (
-    <article className="group rounded-xl border border-white/6 bg-white/[0.02] px-4 py-3 transition hover:bg-white/[0.045]">
+    <article
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      aria-label={`Запись: ${moodLabel(m.mood)}, ${minToHM(m.timeMin)}`}
+      className="group cursor-pointer rounded-xl border border-white/6 bg-white/[0.02] px-4 py-3 transition hover:border-white/12 hover:bg-white/[0.045]"
+    >
       <div className="flex items-start gap-3">
         <MoodFace level={m.mood} size={32} active />
         <div className="min-w-0 flex-1">
@@ -155,12 +181,23 @@ function EntryRow({
         </div>
 
         <div className="flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-          <button className="iconbtn" onClick={onEdit} aria-label="Редактировать запись" title="Редактировать">
+          <button
+            className="iconbtn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit();
+            }}
+            aria-label="Редактировать запись"
+            title="Редактировать"
+          >
             <I n="edit" size={14} />
           </button>
           <button
             className={`iconbtn ${armed ? "!bg-bad/15 !text-bad" : ""}`}
-            onClick={onDelete}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
             aria-label={armed ? "Подтвердить удаление" : "Удалить запись"}
             title={armed ? "Нажми ещё раз для удаления" : "Удалить"}
           >
