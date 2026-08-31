@@ -15,7 +15,40 @@ import TaskModal, { TaskDraft } from "./components/TaskModal";
 import { LogoMark } from "./components/icons";
 import { todayKey } from "./lib/time";
 import { useHotkeys } from "./shared/hooks/useHotkeys";
+import { parseMoodRoute, routeTab } from "./features/mood/domain/deeplinks";
+import { deserializeFilters } from "./features/mood/domain/moodFilters";
 import type { TabId, Task } from "./lib/types";
+
+/**
+ * Мост hash-роутинга (Фаза F, §4): #/mood, #/mood/journal?filters=...,
+ * #/mood/entry/:id, #/mood/overview/week|month|insights.
+ * Экраны синхронизируют hash через replaceState (без лишних событий),
+ * а навигация по ссылкам/back-forward приходит сюда через hashchange.
+ */
+function DeepLinkBridge() {
+  const app = useApp();
+  const userId = app.user?.id;
+
+  React.useEffect(() => {
+    if (!app.booted || !userId) return;
+    const apply = () => {
+      const route = parseMoodRoute(window.location.hash);
+      if (route.kind === "none") return;
+      const tab = routeTab(route);
+      if (tab) app.setTab(tab);
+      if (route.kind === "journal") app.setDeepLink({ filters: deserializeFilters(route.filters) });
+      else if (route.kind === "entry") app.setDeepLink({ entryId: route.id });
+      else if (route.kind === "overview") app.setDeepLink({ overviewTab: route.tab });
+    };
+    apply();
+    window.addEventListener("hashchange", apply);
+    return () => window.removeEventListener("hashchange", apply);
+    // намеренно: реагируем только на загрузку, смену пользователя и hashchange
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [app.booted, userId]);
+
+  return null;
+}
 
 function Splash() {
   return (
@@ -77,6 +110,7 @@ function Body() {
   return (
     <>
       <div className="rhythm-bg" />
+      <DeepLinkBridge />
       <Shell onNewTask={() => openNew()} onHelp={() => setHelpOpen(true)} helpOpen={helpOpen} onCloseHelp={() => setHelpOpen(false)}>
         {app.tab === "today" && <TodayScreen onEdit={openEdit} onNewAt={(date, startMin, endMin) => openNew({ date, startMin, endMin })} />}
         {app.tab === "flow" && <FlowScreen />}

@@ -21,6 +21,8 @@ import type {
 import { MoodRepository, type NewMoodInput } from "../features/mood/data/MoodRepository";
 import { MoodPromptRepository } from "../features/mood/data/MoodPromptRepository";
 import { pickPrompt } from "../features/mood/domain/promptBudget";
+import type { MoodFilters } from "../features/mood/domain/moodFilters";
+import type { OverviewTab } from "../features/mood/domain/deeplinks";
 
 interface AppState {
   booted: boolean;
@@ -68,7 +70,11 @@ const initial: AppState = {
   checkInOpenNote: false,
   promptSettings: null,
   activePrompt: null,
+  deepLink: { filters: null, entryId: null, overviewTab: null },
 };
+
+/** Пустой deep link (после потребления экраном). */
+const EMPTY_DEEP_LINK = { filters: null, entryId: null, overviewTab: null };
 
 const DEFAULT_PREFS: User["notifications"] = {
   enabled: false,
@@ -120,6 +126,11 @@ interface Ctx extends AppState {
   evaluatePrompts: () => void;
   dismissPrompt: () => void;
   savePromptSettings: (patch: Partial<Omit<MoodPromptSettings, "userId" | "updatedAt">>) => void;
+
+  /* Deep links (Фаза F): роутер кладёт данные сюда, экран потребляет один раз. */
+  consumeDeepLink: () => AppState["deepLink"];
+  clearDeepLink: () => void;
+  setDeepLink: (d: Partial<AppState["deepLink"]>) => void;
 
   logFocusSession: (s: Omit<FocusSession, "id" | "userId" | "date">) => FocusSession;
 
@@ -489,6 +500,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     patch({ promptSettings: next });
   }, [patch]);
 
+  /* ---------- deep links (Фаза F) ---------- */
+  /** Экран забирает данные маршрута ровно один раз (затем они гасятся). */
+  const consumeDeepLink = useCallback((): AppState["deepLink"] => {
+    const d = stateRef.current.deepLink;
+    if (d.filters || d.entryId || d.overviewTab) patch({ deepLink: EMPTY_DEEP_LINK });
+    return d;
+  }, [patch]);
+
+  const clearDeepLink = useCallback(() => patch({ deepLink: EMPTY_DEEP_LINK }), [patch]);
+
+  const setDeepLink = useCallback(
+    (d: Partial<AppState["deepLink"]>) => patch({ deepLink: { ...EMPTY_DEEP_LINK, ...d } }),
+    [patch]
+  );
+
   /* ---------- flow sessions ---------- */
   const logFocusSession = useCallback((s: Omit<FocusSession, "id" | "userId" | "date">): FocusSession => {
     const u = stateRef.current.user!;
@@ -665,6 +691,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     addTask, updateTask, removeTask, setTaskStatus, applyRoutine,
     saveMood, updateMoodLog, removeMoodLog, restoreMoodLog, openCheckIn, closeCheckIn,
     evaluatePrompts, dismissPrompt, savePromptSettings,
+    consumeDeepLink, clearDeepLink, setDeepLink,
     logFocusSession,
     addTemplate, removeTemplate,
     pendingSuggestion, acceptSuggestion, dismissSuggestion, snoozeSuggestion, applyReschedule,

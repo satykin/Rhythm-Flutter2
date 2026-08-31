@@ -4,15 +4,21 @@
  * редактирование и удаление (Undo). Аналитика — отдельно (Фаза C).
  * ============================================================ */
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { I, MoodFace } from "../../../components/icons";
 import { useApp } from "../../../state/store";
+import { db } from "../../../lib/db";
 import { useMoodEntries } from "./hooks/useMoodEntries";
 import { moodLabel } from "../domain/moodService";
-import { minToHM } from "../../../lib/time";
+import { fmtDateShort, minToHM } from "../../../lib/time";
 import type { MoodLog } from "../../../lib/types";
 import DetailView from "./DetailView";
 import NewInsightBanner from "./NewInsightBanner";
+import JournalFiltersPanel from "./JournalFiltersPanel";
+import ExportCsvDialog from "./ExportCsvDialog";
+import ExportPdfDialog from "./ExportPdfDialog";
+import { EMPTY_FILTERS, isFilterActive, serializeFilters, type MoodFilters } from "../domain/moodFilters";
+import { canViewEntry } from "../domain/deeplinks";
 
 const SOURCE_LABEL: Record<MoodLog["source"], string> = {
   manual: "вручную",
@@ -23,15 +29,57 @@ const SOURCE_LABEL: Record<MoodLog["source"], string> = {
 
 export default function JournalScreen() {
   const app = useApp();
-  const j = useMoodEntries();
+  const [filters, setFilters] = useState<MoodFilters>(EMPTY_FILTERS);
+  const j = useMoodEntries(filters);
   const [armedDelete, setArmedDelete] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [csvOpen, setCsvOpen] = useState(false);
+  const [pdfOpen, setPdfOpen] = useState(false);
+
+  /* ---------- deep link: filters / entry (Фаза F, §4) ---------- */
+  useEffect(() => {
+    const d = app.consumeDeepLink();
+    if (d.filters) setFilters(d.filters);
+    if (d.entryId && app.user) {
+      /* защита: только своя запись; чужая/несуществующая → «Не найдено» без деталей */
+      const ownerId = db.findMood(d.entryId)?.userId ?? null;
+      if (canViewEntry(ownerId, app.user.id)) setDetailId(d.entryId);
+      else app.toast("error", "Запись не найдена");
+    }
+    // потребление — однократное при входе на экран
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* сериализация фильтров в hash (replace — не ломает историю браузера) */
+  useEffect(() => {
+    const s = serializeFilters(filters);
+    const target = s ? `#/mood/journal?filters=${s}` : "#/mood/journal";
+    if (window.location.hash !== target) {
+      history.replaceState(null, "", `${window.location.pathname}${window.location.search}${target}`);
+    }
+  }, [filters]);
 
   /* Запись для Detail View (ищется по id, чтобы правки отражались live). */
   const detailEntry = useMemo(
     () => (detailId ? app.moods.find((m) => m.id === detailId) ?? null : null),
     [detailId, app.moods]
   );
+
+  /* уникальные теги для панели фильтров (по убыванию частоты) */
+  const availableTags = useMemo(() => {
+    const freq = new Map<string, number>();
+    for (const m of app.moods) for (const t of m.tags) freq.set(t, (freq.get(t) ?? 0) + 1);
+    return [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  }, [app.moods]);
+
+  /* период для сводки экспорта — из фактических дат отфильтрованных записей */
+  const periodLabel = useMemo(() => {
+    if (!j.filtered.length) return "нет записей";
+    const dates = j.filtered.map((m) => m.date).sort();
+    const from = dates[0];
+    const to = dates[dates.length - 1];
+    return from === to ? fmtDateShort(from) : `с ${from} по ${to}`;
+  }, [j.filtered]);
 
   const doDelete = (m: MoodLog) => {
     const needsConfirm = Boolean(m.note) || m.linkedTaskIds.length > 0;
@@ -73,14 +121,23 @@ export default function JournalScreen() {
               aria-label="Поиск по журналу"
             />
           </div>
+          <button className="btn btn-ghost !px-2.5 !py-2" onClick={() => setCsvOpen(true)} title="Экспорт CSV" aria-label="Экспорт CSV">
+            <I n="download" size={15} />
+          </button>
+          <button className="btn btn-ghost !px-2.5 !py-2" onClick={() => setPdfOpen(true)} title="Отчёт за период (PDF)" aria-label="Отчёт за период">
+            <I n="file" size={15} />
+          </button>
           <button className="btn btn-primary !px-3 !py-2" onClick={() => app.openCheckIn()} title="Отметить состояние (M)">
             <I n="plus" size={15} sw={2.4} /> Отметить
           </button>
         </div>
       </section>
 
+      {/* расширенные фильтры (Фаза F, §1) */}
+      <JournalFiltersPanel filters={filters} onChange={setFilters} availableTags={availableTags} total={j.total} />
+
       {/* пустые состояния */}
-      {j.total === 0 && !j.query && (
+      {j.total === 0 && !j.query && !isFilterActive(filters) && (
         <section className="anim-rise d-1 flex flex-col items-center rounded-2xl border border-dashed border-white/10 bg-white/[0.015] px-6 py-14 text-center">
           <MoodFace level={3} size={44} />
           <h2 className="mt-4 font-display text-[16px] font-semibold text-mist-50">Здесь появятся твои состояния</h2>
@@ -93,10 +150,15 @@ export default function JournalScreen() {
         </section>
       )}
 
-      {j.total === 0 && j.query && (
+      {j.total === 0 && (j.query || isFilterActive(filters)) && (
         <section className="anim-rise rounded-2xl border border-dashed border-white/10 px-6 py-12 text-center">
-          <p className="text-[13px] font-semibold text-mist-400">По запросу «{j.query}» ничего не нашлось</p>
-          <button className="btn btn-ghost mt-4" onClick={() => j.setQuery("")}>Сбросить поиск</button>
+          <p className="text-[13px] font-semibold text-mist-400">
+            {j.query ? `По запросу «${j.query}» ничего не нашлось` : "Под текущие фильтры не попало ни одной записи"}
+          </p>
+          <div className="mt-4 flex justify-center gap-2">
+            {j.query && <button className="btn btn-ghost" onClick={() => j.setQuery("")}>Сбросить поиск</button>}
+            {isFilterActive(filters) && <button className="btn btn-ghost" onClick={() => setFilters(EMPTY_FILTERS)}>Сбросить фильтры</button>}
+          </div>
         </section>
       )}
 
@@ -130,6 +192,10 @@ export default function JournalScreen() {
 
       {/* Detail View (Фаза B) */}
       <DetailView entry={detailEntry} onClose={() => setDetailId(null)} onOpenEntry={(id) => setDetailId(id)} />
+
+      {/* Экспорт (Фаза F): только по явному действию, с подтверждением */}
+      <ExportCsvDialog open={csvOpen} onClose={() => setCsvOpen(false)} entries={j.filtered} periodLabel={periodLabel} />
+      <ExportPdfDialog open={pdfOpen} onClose={() => setPdfOpen(false)} />
     </div>
   );
 }

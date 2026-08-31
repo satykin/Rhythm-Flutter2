@@ -2,31 +2,47 @@
  * Mood Overview — отдельный экран аналитики (Фаза C, §10).
  * Три вкладки: Неделя (Tapestry) · Месяц · Инсайты.
  * Аналитика не смешивается с лентой Journal.
+ * Фаза F: таб из deep link (#/mood/overview/...), PDF-отчёт.
  * ============================================================ */
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Seg, Modal } from "../../../components/ui";
 import { I } from "../../../components/icons";
+import { useApp } from "../../../state/store";
 import MoodTapestry from "./MoodTapestry";
 import MonthAnalytics from "./MonthAnalytics";
 import InsightsTab from "./InsightsTab";
 import PromptSettingsPanel from "./PromptSettingsPanel";
-import { useMoodCorrelations } from "./hooks/useMoodCorrelations";
-
-type Tab = "week" | "month" | "insights";
+import ExportPdfDialog from "./ExportPdfDialog";
+import type { OverviewTab } from "../domain/deeplinks";
 
 export default function MoodOverviewScreen() {
-  const [tab, setTab] = useState<Tab>("week");
+  const app = useApp();
+  const [tab, setTab] = useState<OverviewTab>("week");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  /* Фаза C: пересчёт и сохранение корреляций — здесь, на уровне экрана.
-     Фаза E (InsightsTab) только читает сохранённое, не пересчитывая. */
-  useMoodCorrelations();
+  const [pdfOpen, setPdfOpen] = useState(false);
+
+  /* deep link: #/mood/overview/week|month|insights */
+  useEffect(() => {
+    const d = app.consumeDeepLink();
+    if (d.overviewTab) setTab(d.overviewTab);
+    // однократное потребление при входе на экран
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* синхронизация таба в hash (replace — не плодит историю) */
+  useEffect(() => {
+    const target = tab === "week" ? "#/mood" : `#/mood/overview/${tab}`;
+    if (window.location.hash !== target) {
+      history.replaceState(null, "", `${window.location.pathname}${window.location.search}${target}`);
+    }
+  }, [tab]);
 
   return (
     <div className="mx-auto max-w-[820px] space-y-5">
       <div className="anim-rise flex items-center gap-2">
         <div className="flex-1">
-          <Seg<Tab>
+          <Seg<OverviewTab>
             value={tab}
             onChange={setTab}
             options={[
@@ -36,6 +52,14 @@ export default function MoodOverviewScreen() {
             ]}
           />
         </div>
+        <button
+          className="btn btn-ghost !px-2.5 !py-2"
+          onClick={() => setPdfOpen(true)}
+          aria-label="Отчёт за период (PDF)"
+          title="Отчёт за период"
+        >
+          <I n="file" size={15} />
+        </button>
         <button
           className="iconbtn shrink-0"
           onClick={() => setSettingsOpen(true)}
@@ -55,6 +79,8 @@ export default function MoodOverviewScreen() {
         {tab === "month" && <MonthAnalytics />}
         {tab === "insights" && <InsightsTab />}
       </div>
+
+      <ExportPdfDialog open={pdfOpen} onClose={() => setPdfOpen(false)} />
     </div>
   );
 }

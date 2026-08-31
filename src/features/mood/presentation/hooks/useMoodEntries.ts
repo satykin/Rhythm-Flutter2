@@ -74,6 +74,8 @@ export function useMoodEntries(filters?: MoodFilters) {
   return {
     query,
     setQuery,
+    /** все записи после поиска+фильтров (для счётчика и экспорта) */
+    filtered,
     groups,
     total: filtered.length,
     hasMore,
