@@ -169,6 +169,7 @@ export default function AuthScreen() {
                 <button
                   key={m}
                   onClick={() => switchMode(m)}
+                  data-testid={`auth-tab-${m}`}
                   className={`rounded-lg py-1.5 text-[12.5px] font-bold transition-all ${
                     mode === m ? "bg-ink-600/80 text-mist-50" : "text-mist-400 hover:text-mist-200"
                   }`}
@@ -193,30 +194,31 @@ export default function AuthScreen() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     autoComplete="name"
+                    data-testid="auth-name"
                   />
                 </Field>
               )}
               <Field label="Почта" error={errs.email}>
-                <input
-                  className={`input ${errs.email ? "err" : ""}`}
-                  placeholder="you@rhythm.app"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"
-                />
-              </Field>
+                  <input
+                    className={`input ${errs.email ? "err" : ""}`}
+                    placeholder="you@rhythm.app"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    autoComplete="email"
+                    data-testid="auth-email"
+                  />              </Field>
               <Field label="Пароль" error={errs.pass}>
-                <input
-                  className={`input ${errs.pass ? "err" : ""}`}
-                  placeholder="••••••••"
-                  type="password"
-                  value={pass}
-                  onChange={(e) => setPass(e.target.value)}
-                  autoComplete={mode === "login" ? "current-password" : "new-password"}
-                />
-              </Field>
-              <button type="submit" className="btn btn-primary w-full !py-[11px]" disabled={busy !== null}>
+                  <input
+                    className={`input ${errs.pass ? "err" : ""}`}
+                    placeholder="••••••••"
+                    type="password"
+                    value={pass}
+                    onChange={(e) => setPass(e.target.value)}
+                    autoComplete={mode === "login" ? "current-password" : "new-password"}
+                    data-testid="auth-password"
+                  />              </Field>
+              <button type="submit" className="btn btn-primary w-full !py-[11px]" disabled={busy !== null} data-testid="auth-submit">
                 {busy === "form" ? <Spinner size={16} /> : <I n="arrowRight" size={16} />}
                 {mode === "login" ? "Войти в свой день" : "Создать аккаунт"}
               </button>

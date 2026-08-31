@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------
+  # verify: типы → линтер → формат → юнит-тесты → сборка (fail-fast).
+  # Любой упавший шаг роняет пайплайн.
+  # ---------------------------------------------------------------
+  verify:
+    name: verify (tsc · eslint · prettier · vitest · build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (tsc --noEmit, strict)
+        run: npx tsc --noEmit
+
+      # ESLint — flat config (eslint.config.js), поэтому --ext не используется:
+      # сопоставление .ts/.tsx/.js задаёт сам конфиг. Нулевая толерантность.
+      - name: Lint (ESLint, --max-warnings 0)
+        run: npx eslint . --max-warnings 0
+
+      - name: Format check (Prettier)
+        run: npx prettier --check .
+
+      - name: Unit tests + coverage (Vitest)
+        run: npx vitest run --coverage
+
+      - name: Production build
+        run: npm run build
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------
+  # e2e-check: определяет, доступны ли секреты (для PR из форков их нет).
+  # Позволяет корректно ПРОПУСТИТЬ e2e, а не уронить пайплайн.
+  # ---------------------------------------------------------------
+  e2e-check:
+    name: e2e secrets check
+    runs-on: ubuntu-latest
+    outputs:
+      has-secrets: ${{ steps.check.outputs.has }}
+    steps:
+      - id: check
+        run: echo "has=${{ secrets.E2E_PASSWORD != '' }}" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------
+  # e2e: Playwright против прод-сборки. Получает секреты Supabase и
+  # креды тестового пользователя из секретов репозитория. Пропускается,
+  # если секреты недоступны (например, PR из форка).
+  # ---------------------------------------------------------------
+  e2e:
+    name: e2e (Playwright)
+    runs-on: ubuntu-latest
+    needs: e2e-check
+    if: needs.e2e-check.outputs.has-secrets == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        run: npm run test:e2e
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+          CI: "true"
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: warn
+
+      - name: Upload Playwright traces / screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: test-results/
+          if-no-files-found: warn

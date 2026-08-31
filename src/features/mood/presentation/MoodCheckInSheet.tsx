@@ -77,7 +77,7 @@ export default function MoodCheckInSheet() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="dialog" aria-modal="true" aria-label="Отметить настроение">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="dialog" aria-modal="true" aria-label="Отметить настроение" data-testid="checkin-sheet">
       <div className="anim-fade absolute inset-0 bg-ink-950/75 backdrop-blur-[3px]" onClick={app.closeCheckIn} />
 
       <div
@@ -122,6 +122,7 @@ export default function MoodCheckInSheet() {
                   role="radio"
                   aria-checked={selected}
                   aria-label={s.label}
+                  data-testid={`mood-state-${s.score}`}
                   title={`${s.label} — ${s.hint}`}
                   onClick={() => f.setMood(s.score)}
                   onMouseEnter={() => setHovered(s.score)}
@@ -151,6 +152,7 @@ export default function MoodCheckInSheet() {
             <button
               className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/12 py-2 text-[12px] font-bold text-mist-400 transition hover:border-vio-400/40 hover:text-vio-300"
               onClick={() => f.setDetailsOpen(true)}
+              data-testid="checkin-add-details"
             >
               <I n="plus" size={13} /> Добавить детали
             </button>
@@ -272,6 +274,7 @@ export default function MoodCheckInSheet() {
               disabled={!f.canSave}
               onClick={onSave}
               title={f.canSave ? "Сохранить (Enter)" : "Сначала выбери состояние"}
+              data-testid="checkin-save"
             >
               <I n="check" size={15} sw={2.4} /> {f.editing ? "Сохранить" : "Сохранить"}
             </button>

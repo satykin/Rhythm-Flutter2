@@ -3,3 +3,13 @@ node_modules/
 dist/
 build/
 *.log
+
+# Test / coverage artifacts
+coverage/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# E2E auth storage state (contains a logged-in session — never commit)
+.auth/

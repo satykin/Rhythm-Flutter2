@@ -70,6 +70,7 @@ function ToastHost() {
       {toasts.map((t) => (
         <div
           key={t.id}
+          data-testid={`toast-${t.kind}`}
           className={`anim-toast pointer-events-auto flex items-start gap-2.5 rounded-xl border px-3.5 py-3 shadow-xl backdrop-blur ${color[t.kind]}`}
         >
           <I n={icon[t.kind]} size={16} className="mt-[1px]" />
@@ -434,6 +435,7 @@ export default function Shell({
               <button
                 key={n.id}
                 onClick={() => app.setTab(n.id)}
+                data-testid={`nav-${n.id}`}
                 className={`group relative flex items-center gap-3 rounded-[10px] px-3 py-[9px] text-left text-[13.5px] font-bold transition-all duration-200 ${
                   active ? "bg-white/6 text-mist-50" : "text-mist-400 hover:bg-white/[0.035] hover:text-mist-200"
                 }`}
@@ -552,6 +554,7 @@ export default function Shell({
               <button
                 key={n.id}
                 onClick={() => app.setTab(n.id)}
+                data-testid={`nav-${n.id}`}
                 className={`flex flex-1 flex-col items-center gap-1 py-2.5 text-[9px] font-bold transition ${
                   active ? "text-vio-300" : "text-mist-500"
                 }`}

@@ -98,7 +98,7 @@ export default function JournalScreen() {
   };
 
   return (
-    <div className="mx-auto max-w-[720px] space-y-5">
+    <div className="mx-auto max-w-[720px] space-y-5" data-testid="journal-feed">
       {/* мягкое проактивное появление нового инсайта (Фаза E, §8) */}
       <NewInsightBanner />
 
@@ -121,13 +121,13 @@ export default function JournalScreen() {
               aria-label="Поиск по журналу"
             />
           </div>
-          <button className="btn btn-ghost !px-2.5 !py-2" onClick={() => setCsvOpen(true)} title="Экспорт CSV" aria-label="Экспорт CSV">
+          <button className="btn btn-ghost !px-2.5 !py-2" onClick={() => setCsvOpen(true)} title="Экспорт CSV" aria-label="Экспорт CSV" data-testid="export-csv-btn">
             <I n="download" size={15} />
           </button>
           <button className="btn btn-ghost !px-2.5 !py-2" onClick={() => setPdfOpen(true)} title="Отчёт за период (PDF)" aria-label="Отчёт за период">
             <I n="file" size={15} />
           </button>
-          <button className="btn btn-primary !px-3 !py-2" onClick={() => app.openCheckIn()} title="Отметить состояние (M)">
+          <button className="btn btn-primary !px-3 !py-2" onClick={() => app.openCheckIn()} title="Отметить состояние (M)" data-testid="checkin-open-btn">
             <I n="plus" size={15} sw={2.4} /> Отметить
           </button>
         </div>
@@ -218,6 +218,7 @@ function EntryRow({
       role="button"
       tabIndex={0}
       onClick={onOpen}
+      data-testid="journal-entry"
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
