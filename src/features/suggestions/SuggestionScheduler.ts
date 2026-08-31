@@ -1,8 +1,11 @@
 /* ============================================================
  * SuggestionScheduler — когда запускать анализ (§7):
  *  • при открытии приложения (полный пересчёт);
- *  • при событиях: создана задача, изменён таймлайн, просрочка;
- *  • ночной пересчёт «золотых часов» (раз в сутки).
+ *  • при событиях: создана задача, изменён таймлайн, просрочка.
+ * Пересчёт «золотых часов» раз в сутки выполняется внутри recompute
+ * через ensureSlots (см. SuggestionRepository) — планировщик лишь
+ * регулярно даёт ему ход. В будущем пересчёт можно перенести на
+ * pg_cron + Supabase edge function.
  * Хранит дедупликацию «последнего запуска», чтобы не спамить.
  * ============================================================ */
 
@@ -13,16 +16,11 @@ import type { Suggestion } from "../../lib/types";
 const MIN_INTERVAL_MS = 20_000; // не чаще раза в 20 секунд
 let lastRun = 0;
 
-export interface SchedulerResult {
-  suggestions: Suggestion[];
-  recomputed: boolean;
-}
-
 /**
  * Запуск анализа. `force` — полный пересчёт (открытие приложения);
  * без force соблюдается интервал (события таймлайна).
  */
-export function runScheduler(userId: string, opts: { force?: boolean } = {}): SchedulerResult {
+export function runScheduler(userId: string, opts: { force?: boolean } = {}): Suggestion[] {
   const now = Date.now();
   const shouldRun = opts.force || now - lastRun >= MIN_INTERVAL_MS;
 
@@ -31,7 +29,7 @@ export function runScheduler(userId: string, opts: { force?: boolean } = {}): Sc
     lastRun = now;
   }
 
-  return { suggestions: visible(userId, nowMin()), recomputed: shouldRun };
+  return visible(userId, nowMin());
 }
 
 /** Сброс (смена пользователя / выход). */

@@ -83,3 +83,62 @@ export function productivityWindows(scores: number[], opts: { minScore?: number 
 export function goldenWindow(windows: ProductivityWindow[], now = nowMin()): ProductivityWindow | null {
   return windows.find((w) => now >= w.start && now < w.end) ?? null;
 }
+
+/* ============================================================
+ * GAP-1: персистентные слоты (user_productivity_slots, §8).
+ * Формула score — та же (§4.1), переиспользуется scoreSlots;
+ * здесь — упаковка в записи и выбор окон по адаптивному порогу.
+ * ============================================================ */
+
+/** 48 записей (slot_index 0..47) для upsert в user_productivity_slots. */
+export function computeSlots(
+  tasks: Task[],
+  sessions: FocusSession[],
+  opts: { days?: number; today?: string } = {}
+): SlotScore[] {
+  return scoreSlots(tasks, sessions, opts).map((score, slotIndex) => ({ slotIndex, score }));
+}
+
+/**
+ * Золотые часы из СОХРАНЁННЫХ слотов.
+ * Порог = max(2, медиана ненулевых слотов) — документированный выбор:
+ *  • медиана адаптируется к объёму данных пользователя (у активного
+ *    scores выше, у спокойного ниже — пики выявляются относительно
+ *    собственной нормы, а не абсолютной константы);
+ *  • пол 2 сохранён от прежнего фиксированного порога, чтобы случайный
+ *    слабый сигнал (например, 20 мин фокуса → 0.67) не стал «золотым часом».
+ */
+export function goldenWindowsFromSlots(slots: SlotScore[]): ProductivityWindow[] {
+  const scores = new Array<number>(SLOT_COUNT).fill(0);
+  for (const s of slots) {
+    if (s.slotIndex >= 0 && s.slotIndex < SLOT_COUNT) scores[s.slotIndex] = s.score;
+  }
+  const nonzero = scores.filter((v) => v > 0);
+  if (!nonzero.length) return [];
+  const sorted = [...nonzero].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  return productivityWindows(scores, { minScore: Math.max(2, median) });
+}
+
+/**
+ * Cold start (GAP-1): golden_hour генерируется только при ≥ `minDays`
+ * днях с данными (завершённые задачи ИЛИ фокус-сессии) за окно 14 дней.
+ * Слоты при этом считать можно — они просто не порождают подсказку.
+ */
+export function hasGoldenHistory(
+  tasks: Task[],
+  sessions: FocusSession[],
+  today = todayKey(),
+  minDays = 7
+): boolean {
+  const from = addDaysKey(today, -13);
+  const days = new Set<string>();
+  for (const t of tasks) {
+    if (t.status === "done" && t.date >= from && t.date <= today) days.add(t.date);
+  }
+  for (const fs of sessions) {
+    if (fs.date >= from && fs.date <= today) days.add(fs.date);
+  }
+  return days.size >= minDays;
+}

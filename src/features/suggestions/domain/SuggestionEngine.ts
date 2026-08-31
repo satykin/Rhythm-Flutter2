@@ -6,7 +6,7 @@
 
 import { minToHM, nowMin, todayKey, addDaysKey } from "../../../lib/time";
 import type { EngineSignals, SuggestionCandidate } from "./types";
-import { goldenWindow, productivityWindows, slotToMin } from "./productivity";
+import { goldenWindow, goldenWindowsFromSlots, productivityWindows, slotToMin } from "./productivity";
 import {
   bestTimeFor,
   estimateDuration,
@@ -21,9 +21,14 @@ export function generate(signals: EngineSignals, now = nowMin(), today = todayKe
   const { tasks, focusBySlot, abortedBySlot } = signals;
 
   /* ---------- §4.1 golden_hour ---------- */
-  const scores = productivitySlots(signals);
-  const windows = productivityWindows(scores);
-  const gw = goldenWindow(windows, now);
+  /* GAP-1: приоритет — сохранённые слоты (user_productivity_slots, пересчёт
+   * раз в сутки в репозитории); нет слотов → фолбэк на on-the-fly расчёт. */
+  const windows =
+    signals.slots && signals.slots.length
+      ? goldenWindowsFromSlots(signals.slots)
+      : productivityWindows(productivitySlots(signals));
+  /* GAP-1: cold start — при <7 днях истории golden_hour не генерируется. */
+  const gw = signals.goldenReady ? goldenWindow(windows, now) : null;
   if (gw) {
     const hard = tasks.filter((t) => t.date === today && t.status === "todo" && !t.recurrenceRule && t.startMin > now);
     const highEnergy = hard.filter((t) => t.energy === "high");
