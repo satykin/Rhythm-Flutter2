@@ -5,13 +5,13 @@
  * ============================================================ */
 
 import { db } from "../../../lib/db";
-import { uid } from "../../../lib/time";
-import type { Suggestion, SuggestionFeedback } from "../../../lib/types";
+import { keyFor, todayKey, uid } from "../../../lib/time";
+import type { FocusSession, Suggestion, SuggestionFeedback, Task } from "../../../lib/types";
 import { generate } from "../domain/SuggestionEngine";
 import { applyFeedback, mutedKinds, rank } from "../domain/ranker";
 import type { EngineSignals, KindWeights, SuggestionCandidate } from "../domain/types";
 import { DEFAULT_RULES } from "../domain/types";
-import { SLOT_COUNT } from "../domain/productivity";
+import { computeSlots, hasGoldenHistory, SLOT_COUNT } from "../domain/productivity";
 
 const WEIGHTS_KEY = "rhythm.suggweights.v1";
 
@@ -36,7 +36,6 @@ function saveWeights(userId: string, w: KindWeights) {
 export function buildSignals(userId: string): EngineSignals {
   const tasks = db.tasksOf(userId);
   const sessions = db.focusSessionsOf(userId);
-  const user = db.get().users.find((u) => u.id === userId);
 
   const focusBySlot = new Array<number>(SLOT_COUNT).fill(0);
   const abortedBySlot = new Array<number>(SLOT_COUNT).fill(0);
@@ -47,18 +46,81 @@ export function buildSignals(userId: string): EngineSignals {
     if (!fs.completed) abortedBySlot[slot] += 1;
   }
 
+  /* GAP-1/2: персистентные слоты (пересчёт не чаще раза в сутки). */
+  const today = todayKey();
+  ensureSlots(userId, tasks, sessions, today);
+  const slots = db.slotsOf(userId).map((s) => ({ slotIndex: s.slotIndex, score: s.score }));
+
   return {
     tasks,
     focusBySlot,
     abortedBySlot,
+    slots,
+    goldenReady: hasGoldenHistory(tasks, sessions, today),
     wakingFrom: 7 * 60,
     wakingTo: 23 * 60,
-    ...(user ? {} : {}),
   };
 }
 
 const isQuiet = (nowMin: number, from: number, to: number) =>
   from <= to ? nowMin >= from && nowMin < to : nowMin >= from || nowMin < to;
+
+/* ---------- GAP-2: пересчёт слотов не чаще раза в сутки ---------- */
+
+/** Чистый предикат: пересчитывать, если данных нет, они старше 24 часов
+ *  или их computed_at пришёлся на предыдущий локальный день. */
+export function shouldRecomputeSlots(computedAt: number | null, now: number, today: string): boolean {
+  if (computedAt === null) return true;
+  if (now - computedAt >= 24 * 3600_000) return true;
+  return keyFor(new Date(computedAt)) !== today;
+}
+
+/**
+ * Заполняет user_productivity_slots, если данные устарели (GAP-1/2).
+ * До завершения пересчёта подсказки используют старые слоты: в локальном
+ * режиме расчёт синхронный и занимает единицы мс, поэтому «окна без данных»
+ * не возникает; асинхронный перенос (pg_cron + Supabase edge function) —
+ * будущий шаг, предикат и сигнатура к нему готовы.
+ * Возвращает true, если пересчёт выполнен.
+ */
+export function ensureSlots(
+  userId: string,
+  tasks: Task[],
+  sessions: FocusSession[],
+  today: string,
+  now: number = Date.now()
+): boolean {
+  const existing = db.slotsOf(userId);
+  const computedAt = existing.length ? Math.max(...existing.map((s) => s.computedAt)) : null;
+  if (!shouldRecomputeSlots(computedAt, now, today)) return false;
+  db.upsertSlots(
+    userId,
+    computeSlots(tasks, sessions, { today }).map((r) => ({
+      userId,
+      slotIndex: r.slotIndex,
+      score: r.score,
+      computedAt: now,
+    }))
+  );
+  return true;
+}
+
+/* ---------- GAP-3: охлаждение по задаче (§6: одна задача — раз в 24 ч) ---------- */
+
+/** Подсказка по задаче уже показывалась в окне охлаждения? */
+export function taskCooldownActive(
+  existing: Suggestion[],
+  taskId: string,
+  cooldownHours: number,
+  now: number
+): boolean {
+  const windowMs = cooldownHours * 3600_000;
+  return existing.some((s) => {
+    if (s.context.taskId !== taskId) return false;
+    const shownAt = s.shownAt ?? s.createdAt;
+    return now - shownAt < windowMs;
+  });
+}
 
 /**
  * Полный пересчёт: генерация кандидатов → дедупликация → правила частоты
@@ -96,11 +158,20 @@ export function recompute(userId: string, nowMin: number, today: string): Sugges
 
   /* 6) фильтр и персист новых */
   const fresh: Suggestion[] = [];
+  const cooledTaskIds = new Set<string>(); // задачи, получившие подсказку в этом прогоне
   for (const c of rank(candidates, weights)) {
     if (muted.has(c.kind)) continue;
     if (activeKeys.has(c.dedupKey)) continue;
     if (isQuiet(nowMin, rules.quietFrom, rules.quietTo)) continue;
     if (budget <= 0) continue;
+    /* GAP-3: одна и та же задача — не чаще раза в cooldownForTaskHours (§6). */
+    if (
+      c.context.taskId &&
+      (taskCooldownActive(existing, c.context.taskId, rules.cooldownForTaskHours, now) ||
+        cooledTaskIds.has(c.context.taskId))
+    ) {
+      continue;
+    }
 
     const rec: Suggestion = {
       id: uid(),
@@ -118,6 +189,7 @@ export function recompute(userId: string, nowMin: number, today: string): Sugges
     };
     db.insertSuggestion(rec);
     activeKeys.add(c.dedupKey);
+    if (c.context.taskId) cooledTaskIds.add(c.context.taskId);
     fresh.push(rec);
     budget--;
   }

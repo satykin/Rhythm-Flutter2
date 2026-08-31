@@ -3,6 +3,7 @@
  * ============================================================ */
 
 import type { Task } from "../../../lib/types";
+import type { SlotScore } from "./productivity";
 
 /** Таксономия подсказок (§2) — 8 типов. */
 export type SuggestionKind =
@@ -93,6 +94,13 @@ export interface EngineSignals {
   /** время бодрствования (из профиля) */
   wakingFrom: number;
   wakingTo: number;
+  /**
+   * GAP-1: сохранённые продуктивные слоты (user_productivity_slots).
+   * undefined → фолбэк на on-the-fly расчёт (обратная совместимость).
+   */
+  slots?: SlotScore[];
+  /** GAP-1: cold start — достаточно ли истории (≥7 дней) для golden_hour. */
+  goldenReady: boolean;
 }
 
 /** Вес типа для обучения (§4.7) — хранится per-user. */

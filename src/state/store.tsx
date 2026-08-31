@@ -204,7 +204,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   /* Подсказки: генерация кандидатов + дедупликация по ключу. */
   const refreshFromDb = useCallback((userId: string) => {
     materializeRecurrences(userId);
-    const { suggestions } = runScheduler(userId);
+    const suggestions = runScheduler(userId);
     patch({
       tasks: db.tasksOf(userId).sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin),
       routines: db.routinesOf(userId),
