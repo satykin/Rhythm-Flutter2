@@ -281,6 +281,21 @@ export interface MoodInsightEvent {
   createdAt: number;
 }
 
+/* ============================================================
+ * Журнал экспорта (Фаза F). Логируется ТОЛЬКО факт действия
+ * (тип, число записей, период) — никогда содержимое (спека §14).
+ * ============================================================ */
+
+export interface MoodExportLog {
+  id: string;
+  userId: string;
+  kind: "csv" | "pdf";
+  count: number;
+  /** человекочитаемый период, напр. «с 2026-02-01 по 2026-02-28» */
+  period: string;
+  createdAt: number; // epoch ms
+}
+
 export interface MoodCorrelation {
   userId: string;
   /** 'tag:exercise' | 'weekday:mon' | 'habit:<id>' | 'num:focus_minutes' */

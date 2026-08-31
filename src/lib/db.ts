@@ -10,8 +10,8 @@
  * ============================================================ */
 
 import type {
-  FocusSession, MoodCorrelation, MoodInsightEvent, MoodInsightFeedback, MoodLog, MoodPromptLog, MoodPromptSettings,
-  ProductivitySlot, Routine, Suggestion, SuggestionFeedback, Task, TaskTemplate, User,
+  FocusSession, MoodCorrelation, MoodExportLog, MoodInsightEvent, MoodInsightFeedback, MoodLog, MoodPromptLog,
+  MoodPromptSettings, ProductivitySlot, Routine, Suggestion, SuggestionFeedback, Task, TaskTemplate, User,
 } from "./types";
 import { pad2 } from "./time";
 
@@ -31,6 +31,7 @@ export interface Schema {
   mood_prompt_log: MoodPromptLog[];
   mood_insight_feedback: MoodInsightFeedback[];
   mood_insight_events: MoodInsightEvent[];
+  mood_export_log: MoodExportLog[];
 }
 
 export interface StorageAdapter {
@@ -81,6 +82,7 @@ function backfill(raw: Partial<Schema>): Schema {
     mood_prompt_log: raw.mood_prompt_log ?? [],
     mood_insight_feedback: raw.mood_insight_feedback ?? [],
     mood_insight_events: raw.mood_insight_events ?? [],
+    mood_export_log: raw.mood_export_log ?? [],
   };
 }
 
@@ -109,7 +111,7 @@ let schema: Schema = {
   users: [], tasks: [], routines: [], mood_logs: [],
   focus_sessions: [], suggestions: [], suggestion_feedback: [], user_productivity_slots: [], task_templates: [],
   user_mood_correlations: [], mood_prompt_settings: [], mood_prompt_log: [],
-  mood_insight_feedback: [], mood_insight_events: [],
+  mood_insight_feedback: [], mood_insight_events: [], mood_export_log: [],
 };
 
 export const db = {
@@ -239,6 +241,14 @@ export const db = {
     schema.mood_insight_events.push(e);
   },
 
+  /* ---------- mood_export_log (Фаза F): только факт, не содержимое ---------- */
+  exportLogsOf(userId: string): MoodExportLog[] {
+    return schema.mood_export_log.filter((l) => l.userId === userId);
+  },
+  insertExportLog(l: MoodExportLog) {
+    schema.mood_export_log.push(l);
+  },
+
   /* ---------- focus_sessions ---------- */
   focusSessionsOf(userId: string): FocusSession[] {
     return schema.focus_sessions.filter((s) => s.userId === userId);
@@ -305,6 +315,7 @@ export const db = {
     schema.mood_prompt_log = schema.mood_prompt_log.filter((l) => l.userId !== userId);
     schema.mood_insight_feedback = schema.mood_insight_feedback.filter((f) => f.userId !== userId);
     schema.mood_insight_events = schema.mood_insight_events.filter((e) => e.userId !== userId);
+    schema.mood_export_log = schema.mood_export_log.filter((l) => l.userId !== userId);
     await this.commit();
   },
 };

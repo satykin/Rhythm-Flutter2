@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../../../../state/store";
 import { sortDesc } from "../../domain/moodService";
 import { fmtDateLong, relDayLabel, todayKey } from "../../../../lib/time";
+import { applyFilters, type MoodFilters } from "../../domain/moodFilters";
 import type { MoodLog } from "../../../../lib/types";
 
 export const PAGE_SIZE = 15;
@@ -17,26 +18,25 @@ export interface MoodDayGroup {
   entries: MoodLog[];
 }
 
-export function useMoodEntries() {
+/**
+ * Лента Журнала (Фаза A + расширенные фильтры Фазы F).
+ * Фильтры применяются ДО пагинации (лента учитывает их, а не весь
+ * массив в памяти рендера) и комбинируются с текстовым поиском.
+ */
+export function useMoodEntries(filters?: MoodFilters) {
   const app = useApp();
   const [query, setQuery] = useState("");
   const [visible, setVisible] = useState(PAGE_SIZE);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  /* поиск (заметка + теги), регистронезависимый */
-  const filtered = useMemo(() => {
-    const all = sortDesc(app.moods);
-    const q = query.trim().toLowerCase();
-    if (!q) return all;
-    return all.filter(
-      (m) =>
-        (m.note ?? "").toLowerCase().includes(q) ||
-        m.tags.some((t) => t.toLowerCase().includes(q))
-    );
-  }, [app.moods, query]);
+  /* поиск (заметка + теги) + фильтры (И между типами, ИЛИ внутри типа) */
+  const filtered = useMemo(
+    () => applyFilters(sortDesc(app.moods), filters ?? { states: [], tags: [], sources: [], hasNote: null, hasLinks: null }, query),
+    [app.moods, filters, query]
+  );
 
-  /* сброс пагинации при смене поиска */
-  useEffect(() => setVisible(PAGE_SIZE), [query]);
+  /* сброс пагинации при смене поиска или фильтров */
+  useEffect(() => setVisible(PAGE_SIZE), [query, filters]);
 
   const shown = useMemo(() => filtered.slice(0, visible), [filtered, visible]);
   const hasMore = visible < filtered.length;

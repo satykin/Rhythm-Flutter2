@@ -45,6 +45,8 @@ interface AppState {
   /* Mood Prompts (Фаза D) */
   promptSettings: MoodPromptSettings | null;
   activePrompt: PromptType | null;
+  /** Deep links Фазы F: данные из hash-маршрута (однократное потребление экраном). */
+  deepLink: { filters: MoodFilters | null; entryId: string | null; overviewTab: OverviewTab | null };
 }
 
 const initial: AppState = {
