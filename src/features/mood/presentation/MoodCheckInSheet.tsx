@@ -166,6 +166,7 @@ export default function MoodCheckInSheet() {
                 </div>
                 <textarea
                   className="input min-h-[64px] resize-y !text-[13px]"
+                  data-testid="checkin-note"
                   placeholder="Пара слов о состоянии (необязательно)…"
                   value={f.note}
                   maxLength={f.noteLimit}

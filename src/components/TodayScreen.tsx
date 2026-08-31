@@ -593,6 +593,7 @@ function MoodCheck() {
           className="mt-2.5 flex w-full items-center gap-3 rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 text-left transition hover:bg-white/[0.06]"
           onClick={() => app.openCheckIn()}
           title="Отметить ещё раз (M)"
+          data-testid="checkin-open"
         >
           <MoodFace level={log.mood} size={30} active />
           <span className="min-w-0 flex-1">
@@ -602,7 +603,7 @@ function MoodCheck() {
           <I n="chevronRight" size={15} className="text-mist-500" />
         </button>
       ) : (
-        <button className="btn btn-soft mt-2.5 w-full" onClick={() => app.openCheckIn()}>
+        <button className="btn btn-soft mt-2.5 w-full" onClick={() => app.openCheckIn()} data-testid="checkin-open">
           <I n="plus" size={14} sw={2.4} /> Отметить состояние
         </button>
       )}

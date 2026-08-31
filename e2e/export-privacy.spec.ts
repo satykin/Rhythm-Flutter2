@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * Сценарий 2 — приватность экспорта (§14): выгрузка только по явному
- * подтверждению. Проверяем, что диалог показывает сводку (число записей +
- * период), а «Отмена» закрывает диалог БЕЗ скачивания файла.
+ * Сценарий 2 — приватность экспорта (спека 2.1, §14): выгрузка ТОЛЬКО по
+ * явному подтверждению. Диалог показывает сводку (число записей + период
+ * из АКТИВНЫХ фильтров), «Отмена» закрывает диалог БЕЗ скачивания файла.
  */
 test.describe("приватность экспорта", () => {
   test("CSV: сводка с числом записей и периодом; Отмена не скачивает", async ({ page }) => {
@@ -17,21 +17,25 @@ test.describe("приватность экспорта", () => {
       downloaded = true;
     });
 
-    /* Открываем диалог экспорта CSV. */
-    await page.getByTestId("export-csv-btn").click();
-    const summary = page.getByTestId("export-csv-summary");
-    await expect(summary).toBeVisible();
+    /* Открываем диалог подтверждения экспорта CSV. */
+    await page.getByTestId("export-csv-trigger").click();
+    const dialog = page.getByTestId("export-confirm-dialog");
+    await expect(dialog).toBeVisible();
 
-    /* Сводка: «Экспортировать N … за период …». */
+    /* Сводка: «Экспортировать N … за период …» (N и период из фильтров). */
+    const summary = page.getByTestId("export-summary");
+    await expect(summary).toBeVisible();
     await expect(summary).toContainText("Экспортировать");
     await expect(summary).toContainText(/за период/);
+    /* Число записей — число, а не пустое место. */
+    await expect(summary).toContainText(/\d+/);
 
     /* Кнопка подтверждения присутствует, но мы её НЕ нажимаем. */
     await expect(page.getByTestId("export-confirm")).toBeVisible();
 
     /* Отмена — явный отказ от выгрузки. */
     await page.getByTestId("export-cancel").click();
-    await expect(summary).toBeHidden();
+    await expect(dialog).toBeHidden();
 
     /* Даём возможному (несанкционированному) скачиванию проявиться. */
     await page.waitForTimeout(600);

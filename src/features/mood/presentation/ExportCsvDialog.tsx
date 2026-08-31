@@ -77,6 +77,7 @@ export default function ExportCsvDialog({
       title={done ? "Экспортировано" : "Экспорт CSV"}
       icon={done ? "check" : "download"}
       width={460}
+      testId="export-confirm-dialog"
       footer={
         !done ? (
           <>
@@ -98,7 +99,7 @@ export default function ExportCsvDialog({
         </div>
       ) : summary ? (
         <div className="space-y-4">
-          <p className="text-[13px] font-semibold text-mist-300" data-testid="export-csv-summary">
+          <p className="text-[13px] font-semibold text-mist-300" data-testid="export-summary">
             Экспортировать <b className="font-display text-[15px] text-mist-50">{entries.length}</b>{" "}
             {plural(entries.length, "запись", "записи", "записей")} за период{" "}
             <b className="text-mist-50">{summary.range}</b>?
