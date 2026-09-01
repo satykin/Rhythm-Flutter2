@@ -18,7 +18,9 @@ import {
 
 export function generate(signals: EngineSignals, now = nowMin(), today = todayKey()): SuggestionCandidate[] {
   const out: SuggestionCandidate[] = [];
-  const { tasks, focusBySlot, abortedBySlot } = signals;
+  /* focusBySlot/abortedBySlot нужны только внутри productivitySlots (фолбэк),
+   * здесь достаточно tasks — слоты приходят из signals.slots (GAP-1). */
+  const { tasks } = signals;
 
   /* ---------- §4.1 golden_hour ---------- */
   /* GAP-1: приоритет — сохранённые слоты (user_productivity_slots, пересчёт

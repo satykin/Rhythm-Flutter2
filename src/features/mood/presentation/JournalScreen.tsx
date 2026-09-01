@@ -35,6 +35,8 @@ export default function JournalScreen() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [csvOpen, setCsvOpen] = useState(false);
   const [pdfOpen, setPdfOpen] = useState(false);
+  /* deep-link на чужую/несуществующую запись → состояние «Не найдено» (§4) */
+  const [notFound, setNotFound] = useState(false);
 
   /* ---------- deep link: filters / entry (Фаза F, §4) ---------- */
   useEffect(() => {
@@ -44,10 +46,12 @@ export default function JournalScreen() {
       /* защита: только своя запись; чужая/несуществующая → «Не найдено» без деталей */
       const ownerId = db.findMood(d.entryId)?.userId ?? null;
       if (canViewEntry(ownerId, app.user.id)) setDetailId(d.entryId);
-      else app.toast("error", "Запись не найдена");
+      else {
+        setNotFound(true);
+        app.toast("error", "Запись не найдена");
+      }
     }
     // потребление — однократное при входе на экран
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* сериализация фильтров в hash (replace — не ломает историю браузера) */
@@ -81,7 +85,7 @@ export default function JournalScreen() {
     return from === to ? fmtDateShort(from) : `с ${from} по ${to}`;
   }, [j.filtered]);
 
-  const doDelete = (m: MoodLog) => {
+  const doDelete = async (m: MoodLog) => {
     const needsConfirm = Boolean(m.note) || m.linkedTaskIds.length > 0;
     if (needsConfirm && armedDelete !== m.id) {
       setArmedDelete(m.id);
@@ -89,18 +93,40 @@ export default function JournalScreen() {
       return;
     }
     setArmedDelete(null);
-    const removed = app.removeMoodLog(m.id);
+    const removed = await app.removeMoodLog(m.id);
     if (removed) {
       app.toast("info", `Запись от ${minToHM(removed.timeMin)} удалена`, [
-        { label: "Вернуть", run: () => app.restoreMoodLog(removed) },
+        { label: "Вернуть", run: () => void app.restoreMoodLog(removed) },
       ]);
     }
   };
 
   return (
-    <div className="mx-auto max-w-[720px] space-y-5">
+    <div className="mx-auto max-w-[720px] space-y-5" data-testid="journal-list">
       {/* мягкое проактивное появление нового инсайта (Фаза E, §8) */}
       <NewInsightBanner />
+
+      {/* deep-link guard: чужая/несуществующая запись (§4, без утечки деталей) */}
+      {notFound && (
+        <section
+          data-testid="not-found"
+          role="status"
+          className="anim-rise flex items-start gap-3 rounded-xl border border-bad/25 bg-bad/[0.07] px-4 py-3.5"
+        >
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-bad/15 text-bad">
+            <I n="alert" size={14} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-bold text-mist-50">Запись не найдена</p>
+            <p className="mt-0.5 text-[11.5px] font-semibold leading-relaxed text-mist-400">
+              Она не существует или принадлежит другому аккаунту — детали не отображаются.
+            </p>
+          </div>
+          <button className="iconbtn !h-7 !w-7" onClick={() => setNotFound(false)} aria-label="Скрыть уведомление">
+            <I n="x" size={13} />
+          </button>
+        </section>
+      )}
 
       {/* шапка + поиск */}
       <section className="anim-rise flex flex-wrap items-center justify-between gap-3">
@@ -121,13 +147,13 @@ export default function JournalScreen() {
               aria-label="Поиск по журналу"
             />
           </div>
-          <button className="btn btn-ghost !px-2.5 !py-2" onClick={() => setCsvOpen(true)} title="Экспорт CSV" aria-label="Экспорт CSV">
+          <button className="btn btn-ghost !px-2.5 !py-2" onClick={() => setCsvOpen(true)} title="Экспорт CSV" aria-label="Экспорт CSV" data-testid="export-csv-trigger">
             <I n="download" size={15} />
           </button>
           <button className="btn btn-ghost !px-2.5 !py-2" onClick={() => setPdfOpen(true)} title="Отчёт за период (PDF)" aria-label="Отчёт за период">
             <I n="file" size={15} />
           </button>
-          <button className="btn btn-primary !px-3 !py-2" onClick={() => app.openCheckIn()} title="Отметить состояние (M)">
+          <button className="btn btn-primary !px-3 !py-2" onClick={() => app.openCheckIn()} title="Отметить состояние (M)" data-testid="checkin-open">
             <I n="plus" size={15} sw={2.4} /> Отметить
           </button>
         </div>
@@ -218,6 +244,7 @@ function EntryRow({
       role="button"
       tabIndex={0}
       onClick={onOpen}
+      data-testid="journal-entry"
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -231,7 +258,7 @@ function EntryRow({
         <MoodFace level={m.mood} size={32} active />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className="text-[13px] font-extrabold text-mist-50">{moodLabel(m.mood)}</span>
+            <span data-testid="journal-entry-mood" className="text-[13px] font-extrabold text-mist-50">{moodLabel(m.mood)}</span>
             <span className="text-[10.5px] font-bold text-mist-500">{minToHM(m.timeMin)}</span>
             <span className="text-[9.5px] font-bold uppercase tracking-wider text-mist-500/70">{SOURCE_LABEL[m.source]}</span>
           </div>

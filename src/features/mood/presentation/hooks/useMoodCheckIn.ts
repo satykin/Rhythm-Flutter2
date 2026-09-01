@@ -92,7 +92,7 @@ export function useMoodCheckIn() {
 
   const canSave = mood !== null;
 
-  const save = useCallback(() => {
+  const save = useCallback(async () => {
     if (mood === null || saving) return;
     setSaving(true);
     const cleanNote = clampNote(note.trim());
@@ -100,7 +100,7 @@ export function useMoodCheckIn() {
     const timeMin = hmToMin(time);
 
     if (editing) {
-      app.updateMoodLog(editing.id, {
+      await app.updateMoodLog(editing.id, {
         mood,
         note: cleanNote || undefined,
         tags: cleanTags,
@@ -110,7 +110,7 @@ export function useMoodCheckIn() {
       });
       app.toast("success", "Запись обновлена");
     } else {
-      const entry = app.saveMood({
+      const entry = await app.saveMood({
         mood,
         note: cleanNote || undefined,
         tags: cleanTags,

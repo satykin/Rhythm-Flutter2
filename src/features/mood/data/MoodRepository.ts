@@ -27,12 +27,12 @@ export const MoodRepository = {
     return db.moodsOf(userId);
   },
 
-  /** Добавить запись. Возвращает созданную запись или null, если валидация не прошла. */
-  add(userId: string, input: NewMoodInput, linkedTaskIds: string[] = []): MoodLog | null {
+  /** Чистый конструктор записи (без записи в БД) — используется обоими провайдерами (Фаза 1.5). */
+  build(userId: string, input: NewMoodInput, linkedTaskIds: string[] = []): MoodLog | null {
     const clean = validateMoodDraft(input);
     if (!clean) return null;
     const now = new Date().toISOString();
-    const entry: MoodLog = {
+    return {
       id: uid(),
       userId,
       date: input.date ?? todayKey(),
@@ -46,7 +46,12 @@ export const MoodRepository = {
       loggedAt: now,
       updatedAt: now,
     };
-    db.insertMood(entry);
+  },
+
+  /** Добавить запись. Возвращает созданную запись или null, если валидация не прошла. */
+  add(userId: string, input: NewMoodInput, linkedTaskIds: string[] = []): MoodLog | null {
+    const entry = this.build(userId, input, linkedTaskIds);
+    if (entry) db.insertMood(entry);
     return entry;
   },
 

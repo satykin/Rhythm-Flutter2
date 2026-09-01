@@ -108,7 +108,6 @@ export default function FlowScreen() {
         : `Подобрано по времени дня, энергии (${Math.round(energy)}%) и истории сессий`;
     return { type: best, duration, advice, reason };
     // считается один раз при входе на экран
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ---------- состояние настройки ---------- */
@@ -439,7 +438,6 @@ export default function FlowScreen() {
   /* consumed flow-link (Flow B) */
   useEffect(() => {
     if (linkedTask) clearFlowLink();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* ---------- countdown 3-2-1 ---------- */
@@ -1025,15 +1023,18 @@ export default function FlowScreen() {
                 showLabels={false}
                 onChange={(lv) => {
                   /* Post-focus: source='post_focus', связь с сессией, НЕ входит в Prompt Budget. */
-                  app.saveMood({
-                    mood: lv,
-                    note: `после Flow: ${cfg.label}`,
-                    tags: ["фокус"],
-                    source: "post_focus",
-                    focusSessionId: sessionRef.current,
-                  });
-                  setMoodPicked(true);
-                  app.toast("success", "Настроение записано в журнал");
+                  void app
+                    .saveMood({
+                      mood: lv,
+                      note: `после Flow: ${cfg.label}`,
+                      tags: ["фокус"],
+                      source: "post_focus",
+                      focusSessionId: sessionRef.current,
+                    })
+                    .then((entry) => {
+                      setMoodPicked(true);
+                      if (entry) app.toast("success", "Настроение записано в журнал");
+                    });
                 }}
               />
               <button

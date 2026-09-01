@@ -6,7 +6,7 @@
 
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import type { MoodLog } from "../../../lib/types";
@@ -78,23 +78,28 @@ beforeEach(() => {
 /* ============================================================ */
 
 describe("Панель фильтров журнала", () => {
+  /* Запросы к записям скоупим к ленте (within), чтобы не ловить одноимённые
+   * чипы фильтров в панели; фикстуры под кликаемый фильтр «Хорошо» = mood 4. */
   it("фильтр по состоянию скрывает остальные записи и обновляет счётчик", async () => {
     appMock.moods = [
-      mk({ id: "a", mood: 5, tags: ["прогулка"] }),
+      mk({ id: "a", mood: 4, tags: ["прогулка"] }),
       mk({ id: "b", mood: 1, date: "2026-02-09" }),
     ];
     render(<JournalScreen />);
-    expect(screen.getByText("Тяжело")).toBeInTheDocument();
+    const feed = screen.getByTestId("journal-list");
+    /* запросы по data-testid, не по тексту: «Тяжело» дублируется чипами фильтров вне ленты */
+    expect(within(feed).getAllByTestId("journal-entry-mood").some((el) => el.textContent?.includes("Тяжело"))).toBe(true);
 
     await userEvent.click(screen.getByTitle("Хорошо"));
 
-    expect(screen.queryByText("Тяжело")).not.toBeInTheDocument(); // mood=1 скрыта
-    expect(screen.getByText("Поток / подъём")).toBeInTheDocument(); // mood=5 видима
+    const moodsAfter = within(feed).queryAllByTestId("journal-entry-mood");
+    expect(moodsAfter.some((el) => el.textContent?.includes("Тяжело"))).toBe(false); // mood=1 скрыта
+    expect(moodsAfter.some((el) => el.textContent?.includes("Хорошо"))).toBe(true); // mood=4 видима
     expect(screen.getByText(/Найдено:/)).toHaveTextContent("1");
   });
 
   it("кнопка «Сбросить» возвращает все записи", async () => {
-    appMock.moods = [mk({ id: "a", mood: 5 }), mk({ id: "b", mood: 1 })];
+    appMock.moods = [mk({ id: "a", mood: 4 }), mk({ id: "b", mood: 1 })];
     render(<JournalScreen />);
 
     await userEvent.click(screen.getByTitle("Хорошо"));
@@ -190,7 +195,11 @@ describe("Deep links: доступ к записи", () => {
     appMock.moods = [mk({ id: "a", mood: 5 }), mk({ id: "b", mood: 1 })];
 
     render(<JournalScreen />);
+    const feed = screen.getByTestId("journal-list");
     expect(screen.getByText(/Найдено:/)).toHaveTextContent("1");
-    expect(screen.queryByText("Тяжело")).not.toBeInTheDocument();
+    /* mood=1 отфильтрована из ленты — в ленте не должно остаться ни одного «Тяжело».
+     * Запрос по data-testid: текст «Тяжело» в чипах фильтров рендерится ВНЕ ленты. */
+    const moods = within(feed).queryAllByTestId("journal-entry-mood");
+    expect(moods.some((el) => el.textContent?.includes("Тяжело"))).toBe(false);
   });
 });

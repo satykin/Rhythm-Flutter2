@@ -12,7 +12,7 @@ import DialogShell from "../../../shared/ui/DialogShell";
 import { I } from "../../../components/icons";
 import { db } from "../../../lib/db";
 import { useApp } from "../../../state/store";
-import { uid, todayKey, plural, fmtDateLong, keyToDate } from "../../../lib/time";
+import { uid, todayKey, plural, fmtDateLong } from "../../../lib/time";
 import { buildReportHtml, PERIOD_OPTIONS, periodBounds, type PeriodOption } from "../domain/moodExport";
 import { getActiveInsights, describeInsight } from "../domain/insights";
 import { InsightRepository } from "../data/InsightRepository";

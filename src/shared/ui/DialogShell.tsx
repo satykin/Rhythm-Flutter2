@@ -17,6 +17,7 @@ export default function DialogShell({
   children,
   footer,
   width = 480,
+  testId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -25,6 +26,8 @@ export default function DialogShell({
   children: React.ReactNode;
   footer?: React.ReactNode;
   width?: number;
+  /** тестовая инфраструктура: data-testid панели */
+  testId?: string;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef, open, onClose);
@@ -39,6 +42,7 @@ export default function DialogShell({
         role="dialog"
         aria-modal="true"
         aria-labelledby="dialog-shell-title"
+        data-testid={testId}
         className="anim-pop card relative flex max-h-[90vh] w-full flex-col overflow-hidden outline-none"
         style={{ maxWidth: width, background: "var(--color-ink-900)" }}
       >

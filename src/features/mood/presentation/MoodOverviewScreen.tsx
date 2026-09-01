@@ -27,7 +27,6 @@ export default function MoodOverviewScreen() {
     const d = app.consumeDeepLink();
     if (d.overviewTab) setTab(d.overviewTab);
     // однократное потребление при входе на экран
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* синхронизация таба в hash (replace — не плодит историю) */

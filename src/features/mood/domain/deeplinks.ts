@@ -27,10 +27,16 @@ export function parseMoodRoute(hash: string): MoodRoute {
   if (!clean.startsWith("/mood")) return { kind: "none" };
   const [pathPart, queryPart] = clean.split("?");
   const seg = pathPart.split("/").filter(Boolean); // ["mood", ...]
-  const params = new URLSearchParams(queryPart ?? "");
+
+  /* Единый контракт (фикс двойного декодирования): filters берём В СЫРОМ
+   * (URL-encoded) виде — без авто-декодирования URLSearchParams. Единственное
+   * декодирование выполняет deserializeFilters. Поэтому round-trip
+   * parseMoodRoute(moodRouteToHash(r)) === r. */
+  const filtersMatch = /(?:^|&)filters=([^&]*)/.exec(queryPart ?? "");
+  const rawFilters = filtersMatch ? filtersMatch[1] : null;
 
   if (seg.length === 1) return { kind: "overview", tab: "week" };
-  if (seg[1] === "journal") return { kind: "journal", filters: params.get("filters") };
+  if (seg[1] === "journal") return { kind: "journal", filters: rawFilters };
   if (seg[1] === "entry" && seg[2]) return { kind: "entry", id: seg[2] };
   if (seg[1] === "overview" && (seg[2] === "week" || seg[2] === "month" || seg[2] === "insights")) {
     return { kind: "overview", tab: seg[2] };

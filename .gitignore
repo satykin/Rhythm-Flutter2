@@ -3,3 +3,18 @@ node_modules/
 dist/
 build/
 *.log
+
+# Test / coverage artifacts
+coverage/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# E2E auth storage state (contains a logged-in session — never commit)
+.auth/
+
+# Environment keys (Supabase URL/anon key) — never commit real values
+.env
+.env.local
+.env.*.local

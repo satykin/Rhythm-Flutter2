@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleG, I, IconName, LogoMark } from "./icons";
-import { Modal, Seg, Spinner } from "./ui";
+import { Modal, Spinner } from "./ui";
 import { useApp } from "../state/store";
 import type { TabId, TaskColor, Toast } from "../lib/types";
 import { fmtClock, fmtDateLong, hmToMin, minToHM, todayKey, plural } from "../lib/time";
@@ -8,8 +8,6 @@ import { COLOR_NAMES, initials, PALETTE_LIST, TASK_COLORS } from "../lib/palette
 import { NOTIF_META, notify } from "../features/notify/notify";
 import { useMoodPrompts } from "../features/mood/presentation/hooks/useMoodPrompts";
 import MoodPromptCard from "../features/mood/presentation/MoodPromptCard";
-
-const NOTIF_KEYS = Object.keys(NOTIF_META) as (keyof typeof NOTIF_META)[];
 
 function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
@@ -70,6 +68,7 @@ function ToastHost() {
       {toasts.map((t) => (
         <div
           key={t.id}
+          data-testid={`toast-${t.kind}`}
           className={`anim-toast pointer-events-auto flex items-start gap-2.5 rounded-xl border px-3.5 py-3 shadow-xl backdrop-blur ${color[t.kind]}`}
         >
           <I n={icon[t.kind]} size={16} className="mt-[1px]" />
@@ -434,6 +433,7 @@ export default function Shell({
               <button
                 key={n.id}
                 onClick={() => app.setTab(n.id)}
+                data-testid={`nav-${n.id}`}
                 className={`group relative flex items-center gap-3 rounded-[10px] px-3 py-[9px] text-left text-[13.5px] font-bold transition-all duration-200 ${
                   active ? "bg-white/6 text-mist-50" : "text-mist-400 hover:bg-white/[0.035] hover:text-mist-200"
                 }`}
@@ -552,6 +552,7 @@ export default function Shell({
               <button
                 key={n.id}
                 onClick={() => app.setTab(n.id)}
+                data-testid={`nav-${n.id}`}
                 className={`flex flex-1 flex-col items-center gap-1 py-2.5 text-[9px] font-bold transition ${
                   active ? "text-vio-300" : "text-mist-500"
                 }`}

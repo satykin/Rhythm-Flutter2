@@ -5,9 +5,10 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { db, sessionStore } from "../lib/db";
+import { data, type AuthUser } from "../lib/data";
 import { seedFor } from "../lib/seed";
 import { googleProvider } from "../lib/sync";
-import { clamp, demoHash, hmToMin, nowMin, todayKey, uid } from "../lib/time";
+import { clamp, hmToMin, todayKey, uid } from "../lib/time";
 import { parseRRule, occurrences } from "../features/timeline/recurrence";
 import { act } from "../features/suggestions/data/SuggestionRepository";
 import { reschedulePlan } from "../features/suggestions/domain/reschedule";
@@ -105,7 +106,7 @@ interface Ctx extends AppState {
   signIn: (email: string, pass: string) => Promise<string | null>;
   signUp: (name: string, email: string, pass: string) => Promise<string | null>;
   signInWith: (provider: "google" | "apple") => Promise<string | null>;
-  signOut: () => void;
+  signOut: () => Promise<void>;
   updateUser: (patch: Partial<User>) => void;
 
   addTask: (input: NewTaskInput) => Task;
@@ -114,10 +115,10 @@ interface Ctx extends AppState {
   setTaskStatus: (id: string, status: TaskStatus) => void;
   applyRoutine: (r: Routine) => { time: number } | null;
 
-  saveMood: (input: NewMoodInput) => MoodLog | null;
-  updateMoodLog: (id: string, patch: Partial<Pick<MoodLog, "mood" | "note" | "tags" | "linkedTaskIds" | "date" | "timeMin">>) => void;
-  removeMoodLog: (id: string) => MoodLog | null;
-  restoreMoodLog: (entry: MoodLog) => void;
+  saveMood: (input: NewMoodInput) => Promise<MoodLog | null>;
+  updateMoodLog: (id: string, patch: Partial<Pick<MoodLog, "mood" | "note" | "tags" | "linkedTaskIds" | "date" | "timeMin">>) => Promise<void>;
+  removeMoodLog: (id: string) => Promise<MoodLog | null>;
+  restoreMoodLog: (entry: MoodLog) => Promise<void>;
   /* Quick Check-In sheet (Журнал 2.1) */
   openCheckIn: (entryId?: string, opts?: { source?: MoodSource; openNote?: boolean }) => void;
   closeCheckIn: () => void;
@@ -201,14 +202,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  /* Подсказки: генерация кандидатов + дедупликация по ключу. */
-  const refreshFromDb = useCallback((userId: string) => {
+  /* Подсказки: генерация кандидатов + дедупликация по ключу.
+   * Фаза 1.5a: moods — из активного DataProvider (Supabase или локально),
+   * остальные таблицы пока локальные (перевод в 1.5b/1.5c). */
+  const refreshFromDb = useCallback(async (userId: string) => {
     materializeRecurrences(userId);
     const suggestions = runScheduler(userId);
+    const moods = data.kind === "supabase" ? await data.moods.list(userId) : db.moodsOf(userId);
     patch({
       tasks: db.tasksOf(userId).sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin),
       routines: db.routinesOf(userId),
-      moods: db.moodsOf(userId),
+      moods,
       templates: db.templatesOf(userId),
       suggestions,
       focusSessions: db.focusSessionsOf(userId),
@@ -237,34 +241,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     seeded.focusSessions.forEach((s) => db.insertFocusSession(s));
   }, []);
 
-  /* ---------- boot ---------- */
-  useEffect(() => {
-    (async () => {
-      await db.boot();
-      const sid = sessionStore.read();
-      const user = sid ? db.get().users.find((u) => u.id === sid) ?? null : null;
-      if (user) {
-        if (db.tasksOf(user.id).length === 0) {
-          seedInto(user);
-          await db.commit();
-        }
-        refreshFromDb(user.id);
-        patch({ user, sync: { ...loadSyncState(user.id), syncing: false } });
-      }
-      patch({ booted: true });
-      void registerWorker();
-      startScheduler(() => {
-        const st = stateRef.current;
-        if (!st.user) return null;
-        return {
-          prefs: st.user.notifications,
-          quietFrom: st.user.quietFrom,
-          quietTo: st.user.quietTo,
-          tasks: st.tasks,
-        };
-      });
-    })();
-  }, [patch, refreshFromDb, seedInto]);
+  /* boot-эффект перенесён ниже auth-секции (использует enterRemote). */
 
   /* ---------- auth ---------- */
   const enterAs = useCallback(async (user: User, isNew: boolean) => {
@@ -275,51 +252,116 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     patch({ user, tab: "today", sync: { ...loadSyncState(user.id), syncing: false } });
   }, [patch, refreshFromDb, seedInto]);
 
-  const signUp = useCallback(async (name: string, email: string, pass: string) => {
-    await new Promise((r) => setTimeout(r, 700));
-    if (db.findUserByEmail(email)) return "Аккаунт с такой почтой уже существует";
+  /**
+   * Вход под реальным Supabase-пользователем (Фаза 1.5a).
+   * Демо-данные НЕ сидируются (production стартует чистым — мастер-план §данные).
+   * Профиль для UI-состояния собирается из auth-метаданных;
+   * user_profiles (настройки) подключается в 1.5c.
+   */
+  const enterRemote = useCallback(async (authUser: AuthUser) => {
     const user: User = {
-      id: uid(), name, email, passHash: demoHash(pass), provider: "email",
+      id: authUser.id,
+      name: authUser.name,
+      email: authUser.email,
+      provider: authUser.provider,
       accent: "violet", sleepHours: 7.5, createdAt: new Date().toISOString(),
-      themePalette: "default", quietFrom: 22 * 60, quietTo: 8 * 60, notifications: { ...DEFAULT_PREFS },
+      themePalette: "default", quietFrom: 22 * 60, quietTo: 8 * 60,
+      notifications: { ...DEFAULT_PREFS },
     };
-    db.insertUser(user);
-    await enterAs(user, true);
+    await refreshFromDb(user.id);
+    patch({ user, tab: "today", sync: { ...initial.sync, syncing: false } });
+  }, [patch, refreshFromDb]);
+
+  const signUp = useCallback(async (name: string, email: string, pass: string) => {
+    const res = await data.signUp(name, email, pass);
+    if (res.error || !res.user) return res.error ?? "Не удалось создать аккаунт";
+    if (data.kind === "supabase") {
+      await enterRemote(res.user);
+      return null;
+    }
+    const local = db.findUserByEmail(email);
+    if (local) await enterAs(local, true);
     return null;
-  }, [enterAs]);
+  }, [enterAs, enterRemote]);
 
   const signIn = useCallback(async (email: string, pass: string) => {
-    await new Promise((r) => setTimeout(r, 600));
-    const user = db.findUserByEmail(email);
-    if (!user) return "Аккаунт не найден — создайте новый";
-    if (user.provider === "email" && user.passHash !== demoHash(pass)) return "Неверный пароль";
-    if (db.tasksOf(user.id).length === 0) seedInto(user);
-    await enterAs(user, false);
+    const res = await data.signIn(email, pass);
+    if (res.error || !res.user) return res.error ?? "Не удалось войти";
+    if (data.kind === "supabase") {
+      await enterRemote(res.user);
+      return null;
+    }
+    const local = db.findUserByEmail(email);
+    if (!local) return "Аккаунт не найден — создайте новый";
+    if (db.tasksOf(local.id).length === 0) seedInto(local);
+    await enterAs(local, false);
     return null;
-  }, [enterAs, seedInto]);
+  }, [enterAs, enterRemote, seedInto]);
 
   const signInWith = useCallback(async (provider: "google" | "apple") => {
-    await new Promise((r) => setTimeout(r, 1000));
-    const email = provider === "google" ? "alex.day@gmail.com" : "alex@icloud.com";
-    let user = db.findUserByEmail(email);
-    const isNew = !user;
-    if (!user) {
-      user = {
-        id: uid(), name: "Alex Day", email, provider,
-        accent: provider === "google" ? "indigo" : "aqua", sleepHours: 7.5,
-        createdAt: new Date().toISOString(),
-        themePalette: "default", quietFrom: 22 * 60, quietTo: 8 * 60, notifications: { ...DEFAULT_PREFS },
-      };
-      db.insertUser(user);
-    }
-    await enterAs(user, isNew);
+    const res = await data.signInWithOAuth(provider);
+    if (res.error) return res.error;
+    /* Supabase: произошёл редирект к провайдеру — сессию подхватит onAuthChange. */
+    if (data.kind === "supabase") return null;
+    const authU = await data.getSession();
+    const local = authU ? db.get().users.find((u) => u.id === authU.id) ?? null : null;
+    if (local) await enterAs(local, db.tasksOf(local.id).length === 0);
     return null;
   }, [enterAs]);
 
-  const signOut = useCallback(() => {
-    sessionStore.clear();
+  const signOut = useCallback(async () => {
+    await data.signOut();
     patch({ user: null, tasks: [], routines: [], moods: [], templates: [], suggestions: [], focusSessions: [], tab: "today", sync: initial.sync, syncLog: [] });
   }, [patch]);
+
+  /* ---------- boot (после auth: нужен enterRemote) ---------- */
+  useEffect(() => {
+    void (async () => {
+      await db.boot();
+
+      if (data.kind === "supabase") {
+        /* Реальный бэкенд: сессию отдаёт Supabase; OAuth-возврат и выход
+           ловим через onAuthChange. Демо-данные не сидируются. */
+        const u = await data.getSession();
+        if (u) await enterRemote(u);
+        patch({ booted: true });
+        return;
+      }
+
+      /* Локальный демо-режим: сессия в localStorage, демо-сид при первом входе. */
+      const sid = sessionStore.read();
+      const user = sid ? db.get().users.find((x) => x.id === sid) ?? null : null;
+      if (user) {
+        if (db.tasksOf(user.id).length === 0) {
+          seedInto(user);
+          await db.commit();
+        }
+        refreshFromDb(user.id);
+        patch({ user, sync: { ...loadSyncState(user.id), syncing: false } });
+      }
+      patch({ booted: true });
+    })();
+
+    void registerWorker();
+    startScheduler(() => {
+      const st = stateRef.current;
+      if (!st.user) return null;
+      return {
+        prefs: st.user.notifications,
+        quietFrom: st.user.quietFrom,
+        quietTo: st.user.quietTo,
+        tasks: st.tasks,
+      };
+    });
+
+    /* Supabase: OAuth-редирект / выход из другой вкладки */
+    const unsubscribe = data.onAuthChange((u) => {
+      if (data.kind !== "supabase") return;
+      if (u) void enterRemote(u);
+      else patch({ user: null, tasks: [], routines: [], moods: [], templates: [], suggestions: [], focusSessions: [], tab: "today", sync: initial.sync, syncLog: [] });
+    });
+    return unsubscribe;
+  }, [enterRemote, patch, refreshFromDb, seedInto]);
 
   const updateUser = useCallback((p: Partial<User>) => {
     const u = stateRef.current.user;
@@ -403,49 +445,103 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return { time: start };
   }, [addTask]);
 
-  /* ---------- mood (Журнал 2.1, Фаза A) ----------
+  /* ---------- mood (Журнал 2.1, Фаза A; с Фаза 1.5a — через DataProvider) ----------
    * Append-модель: каждый чек-ин — отдельная запись (разрешено несколько в день).
-   * «Состояние сегодня» = последняя запись дня (latestMoodOfDay). */
-  const saveMood = useCallback((input: NewMoodInput): MoodLog | null => {
+   * «Состояние сегодня» = последняя запись дня (latestMoodOfDay).
+   * Режим Supabase: записи живут в mood_logs (RLS), конфликты — по updated_at. */
+  const completePromptIfNeeded = useCallback((userId: string, source: MoodLog["source"]) => {
+    const active = stateRef.current.activePrompt;
+    if (active && (source === "morning" || source === "evening") && source === active) {
+      MoodPromptRepository.log(userId, active, "completed");
+      patch({ activePrompt: null });
+    }
+  }, [patch]);
+
+  const saveMood = useCallback(async (input: NewMoodInput): Promise<MoodLog | null> => {
     const u = stateRef.current.user!;
     /* Связи — только те, что пользователь явно подтвердил (спека §7:
      * система предлагает, пользователь выбирает). Никакой тихой автопривязки. */
-    const entry = MoodRepository.add(u.id, input, input.linkedTaskIds ?? []);
+    const entry = MoodRepository.build(u.id, input, input.linkedTaskIds ?? []);
     if (!entry) return null;
-    /* Если запись создана из промпта — логируем completed и гасим карточку. */
-    const active = stateRef.current.activePrompt;
-    if (active && (entry.source === "morning" || entry.source === "evening") && entry.source === active) {
-      MoodPromptRepository.log(u.id, active, "completed");
-      patch({ activePrompt: null });
+
+    if (data.kind === "supabase") {
+      try {
+        const saved = await data.moods.insert(entry);
+        completePromptIfNeeded(u.id, saved.source);
+        await refreshFromDb(u.id);
+        return saved;
+      } catch (e) {
+        toast("error", e instanceof Error ? e.message : "Не удалось сохранить запись");
+        return null;
+      }
     }
+
+    db.insertMood(entry);
+    completePromptIfNeeded(u.id, entry.source);
     void db.commit();
     refreshFromDb(u.id);
     return entry;
-  }, [patch, refreshFromDb]);
+  }, [completePromptIfNeeded, refreshFromDb, toast]);
 
-  const updateMoodLog = useCallback((id: string, p: Partial<Pick<MoodLog, "mood" | "note" | "tags" | "linkedTaskIds" | "date" | "timeMin">>) => {
+  const updateMoodLog = useCallback(async (id: string, p: Partial<Pick<MoodLog, "mood" | "note" | "tags" | "linkedTaskIds" | "date" | "timeMin">>) => {
     const u = stateRef.current.user!;
+
+    if (data.kind === "supabase") {
+      const existing = stateRef.current.moods.find((m) => m.id === id);
+      if (!existing) return;
+      try {
+        await data.moods.update({ ...existing, ...p, updatedAt: new Date().toISOString() });
+        await refreshFromDb(u.id);
+      } catch (e) {
+        toast("error", e instanceof Error ? e.message : "Не удалось обновить запись");
+      }
+      return;
+    }
+
     MoodRepository.update(id, p);
     void db.commit();
     refreshFromDb(u.id);
-  }, [refreshFromDb]);
+  }, [refreshFromDb, toast]);
 
-  const removeMoodLog = useCallback((id: string): MoodLog | null => {
+  const removeMoodLog = useCallback(async (id: string): Promise<MoodLog | null> => {
     const u = stateRef.current.user!;
+
+    if (data.kind === "supabase") {
+      const removed = stateRef.current.moods.find((m) => m.id === id) ?? null;
+      if (!removed) return null;
+      try {
+        await data.moods.remove(u.id, id);
+        await refreshFromDb(u.id);
+      } catch (e) {
+        toast("error", e instanceof Error ? e.message : "Не удалось удалить запись");
+        return null;
+      }
+      return removed;
+    }
+
     const removed = MoodRepository.remove(id);
     if (removed) {
       void db.commit();
       refreshFromDb(u.id);
     }
     return removed;
-  }, [refreshFromDb]);
+  }, [refreshFromDb, toast]);
 
-  const restoreMoodLog = useCallback((entry: MoodLog) => {
+  const restoreMoodLog = useCallback(async (entry: MoodLog) => {
     const u = stateRef.current.user!;
+    if (data.kind === "supabase") {
+      try {
+        await data.moods.insert(entry);
+        await refreshFromDb(u.id);
+      } catch (e) {
+        toast("error", e instanceof Error ? e.message : "Не удалось восстановить запись");
+      }
+      return;
+    }
     MoodRepository.restore(entry);
     void db.commit();
     refreshFromDb(u.id);
-  }, [refreshFromDb]);
+  }, [refreshFromDb, toast]);
 
   /* ---------- Quick Check-In sheet ---------- */
   const openCheckIn = useCallback((entryId?: string, opts?: { source?: MoodSource; openNote?: boolean }) => {
