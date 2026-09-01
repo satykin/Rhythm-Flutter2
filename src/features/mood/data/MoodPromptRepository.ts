@@ -6,7 +6,7 @@
 
 import { db } from "../../../lib/db";
 import { keyFor, todayKey, uid } from "../../../lib/time";
-import type { MoodPromptLog, MoodPromptSettings, PromptAction, PromptType } from "../../../lib/types";
+import type { MoodPromptSettings, PromptAction, PromptType } from "../../../lib/types";
 import { DEFAULT_PROMPT_SETTINGS, type BudgetState, type PromptSettings } from "../domain/promptBudget";
 
 export const MoodPromptRepository = {
@@ -32,7 +32,7 @@ export const MoodPromptRepository = {
    * Снимок состояния бюджета из mood_prompt_log и mood_logs.
    * «Сегодня» — локальный день пользователя.
    */
-  computeBudgetState(userId: string, nowEpoch: number = Date.now()): BudgetState {
+  computeBudgetState(userId: string, _nowEpoch: number = Date.now()): BudgetState {
     const today = todayKey();
     const log = db.promptLogOf(userId);
 

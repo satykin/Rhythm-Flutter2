@@ -99,7 +99,9 @@ export function serializeFilters(f: MoodFilters): string | null {
   return encodeURIComponent(JSON.stringify(s));
 }
 
-/** Возвращает null, если строка пустая или повреждена (защита от мусора в URL). */
+/** Возвращает null, если строка пустая или повреждена (защита от мусора в URL).
+ *  ЕДИНСТВЕННАЯ точка декодирования: на входе — сырая URL-encoded строка из
+ *  deeplinks (parseMoodRoute не декодирует), здесь один decodeURIComponent. */
 export function deserializeFilters(raw: string | null | undefined): MoodFilters | null {
   if (!raw) return null;
   try {

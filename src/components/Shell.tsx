@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { GoogleG, I, IconName, LogoMark } from "./icons";
-import { Modal, Seg, Spinner } from "./ui";
+import { Modal, Spinner } from "./ui";
 import { useApp } from "../state/store";
 import type { TabId, TaskColor, Toast } from "../lib/types";
 import { fmtClock, fmtDateLong, hmToMin, minToHM, todayKey, plural } from "../lib/time";
@@ -8,8 +8,6 @@ import { COLOR_NAMES, initials, PALETTE_LIST, TASK_COLORS } from "../lib/palette
 import { NOTIF_META, notify } from "../features/notify/notify";
 import { useMoodPrompts } from "../features/mood/presentation/hooks/useMoodPrompts";
 import MoodPromptCard from "../features/mood/presentation/MoodPromptCard";
-
-const NOTIF_KEYS = Object.keys(NOTIF_META) as (keyof typeof NOTIF_META)[];
 
 function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (

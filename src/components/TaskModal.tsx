@@ -49,8 +49,10 @@ export default function TaskModal({
     () => (tags.length ? durationHint(app.tasks, tags) : null),
     [app.tasks, tags]
   );
+  /* bestTimeHint учитывает и теги, и уровень энергии — подсказка полезна всегда,
+   * поэтому без мёртвого условия tags.length. */
   const smartTime = useMemo(
-    () => (tags.length || true ? bestTimeHint(app.tasks, { tags, energy }) : null),
+    () => bestTimeHint(app.tasks, { tags, energy }),
     [app.tasks, tags, energy]
   );
 

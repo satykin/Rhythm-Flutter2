@@ -6,7 +6,7 @@
  * ============================================================ */
 
 import type { NotifPrefs, Task } from "../../lib/types";
-import { minToHM, nowMin, todayKey } from "../../lib/time";
+import { minToHM, todayKey } from "../../lib/time";
 import { productivityWindows } from "../suggestions/suggestionService";
 
 export type NotifType = "task_reminder" | "focus_time" | "morning_briefing" | "evening_review";
