@@ -95,6 +95,10 @@ jobs:
       - name: Run Playwright tests
         run: npm run test:e2e
         env:
+          # VITE_* нужны СБОРКЕ (webServer собирает приложение в supabase-режиме),
+          # «голые» SUPABASE_* — Node-клиенту в auth.setup.ts (программный вход).
+          VITE_SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           E2E_EMAIL: ${{ secrets.E2E_EMAIL }}

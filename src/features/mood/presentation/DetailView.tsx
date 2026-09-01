@@ -48,18 +48,18 @@ export default function DetailView({
 
   if (!entry) return null;
 
-  const doDelete = () => {
+  const doDelete = async () => {
     const needsConfirm = Boolean(entry.note) || entry.linkedTaskIds.length > 0;
     if (needsConfirm && !armed) {
       setArmed(true);
       window.setTimeout(() => setArmed(false), 2500);
       return;
     }
-    const removed = app.removeMoodLog(entry.id);
+    const removed = await app.removeMoodLog(entry.id);
     onClose();
     if (removed) {
       app.toast("info", `Запись от ${minToHM(removed.timeMin)} удалена`, [
-        { label: "Вернуть", run: () => app.restoreMoodLog(removed) },
+        { label: "Вернуть", run: () => void app.restoreMoodLog(removed) },
       ]);
     }
   };
@@ -213,7 +213,7 @@ export default function DetailView({
           onClose={() => setPickerOpen(false)}
           entry={entry}
           onSave={(ids) => {
-            app.updateMoodLog(entry.id, { linkedTaskIds: ids });
+            void app.updateMoodLog(entry.id, { linkedTaskIds: ids });
             app.toast("success", `Связано задач: ${ids.length}`);
           }}
         />

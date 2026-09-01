@@ -86,7 +86,7 @@ export default function JournalScreen() {
     return from === to ? fmtDateShort(from) : `с ${from} по ${to}`;
   }, [j.filtered]);
 
-  const doDelete = (m: MoodLog) => {
+  const doDelete = async (m: MoodLog) => {
     const needsConfirm = Boolean(m.note) || m.linkedTaskIds.length > 0;
     if (needsConfirm && armedDelete !== m.id) {
       setArmedDelete(m.id);
@@ -94,10 +94,10 @@ export default function JournalScreen() {
       return;
     }
     setArmedDelete(null);
-    const removed = app.removeMoodLog(m.id);
+    const removed = await app.removeMoodLog(m.id);
     if (removed) {
       app.toast("info", `Запись от ${minToHM(removed.timeMin)} удалена`, [
-        { label: "Вернуть", run: () => app.restoreMoodLog(removed) },
+        { label: "Вернуть", run: () => void app.restoreMoodLog(removed) },
       ]);
     }
   };

@@ -1025,15 +1025,18 @@ export default function FlowScreen() {
                 showLabels={false}
                 onChange={(lv) => {
                   /* Post-focus: source='post_focus', связь с сессией, НЕ входит в Prompt Budget. */
-                  app.saveMood({
-                    mood: lv,
-                    note: `после Flow: ${cfg.label}`,
-                    tags: ["фокус"],
-                    source: "post_focus",
-                    focusSessionId: sessionRef.current,
-                  });
-                  setMoodPicked(true);
-                  app.toast("success", "Настроение записано в журнал");
+                  void app
+                    .saveMood({
+                      mood: lv,
+                      note: `после Flow: ${cfg.label}`,
+                      tags: ["фокус"],
+                      source: "post_focus",
+                      focusSessionId: sessionRef.current,
+                    })
+                    .then((entry) => {
+                      setMoodPicked(true);
+                      if (entry) app.toast("success", "Настроение записано в журнал");
+                    });
                 }}
               />
               <button
