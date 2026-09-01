@@ -258,7 +258,7 @@ function EntryRow({
         <MoodFace level={m.mood} size={32} active />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className="text-[13px] font-extrabold text-mist-50">{moodLabel(m.mood)}</span>
+            <span data-testid="journal-entry-mood" className="text-[13px] font-extrabold text-mist-50">{moodLabel(m.mood)}</span>
             <span className="text-[10.5px] font-bold text-mist-500">{minToHM(m.timeMin)}</span>
             <span className="text-[9.5px] font-bold uppercase tracking-wider text-mist-500/70">{SOURCE_LABEL[m.source]}</span>
           </div>

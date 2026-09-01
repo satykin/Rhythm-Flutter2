@@ -87,12 +87,14 @@ describe("Панель фильтров журнала", () => {
     ];
     render(<JournalScreen />);
     const feed = screen.getByTestId("journal-list");
-    expect(within(feed).getByText("Тяжело")).toBeInTheDocument();
+    /* запросы по data-testid, не по тексту: «Тяжело» дублируется чипами фильтров вне ленты */
+    expect(within(feed).getAllByTestId("journal-entry-mood").some((el) => el.textContent?.includes("Тяжело"))).toBe(true);
 
     await userEvent.click(screen.getByTitle("Хорошо"));
 
-    expect(within(feed).queryByText("Тяжело")).not.toBeInTheDocument(); // mood=1 скрыта
-    expect(within(feed).getByText("Хорошо")).toBeInTheDocument(); // mood=4 видима
+    const moodsAfter = within(feed).queryAllByTestId("journal-entry-mood");
+    expect(moodsAfter.some((el) => el.textContent?.includes("Тяжело"))).toBe(false); // mood=1 скрыта
+    expect(moodsAfter.some((el) => el.textContent?.includes("Хорошо"))).toBe(true); // mood=4 видима
     expect(screen.getByText(/Найдено:/)).toHaveTextContent("1");
   });
 
@@ -195,7 +197,9 @@ describe("Deep links: доступ к записи", () => {
     render(<JournalScreen />);
     const feed = screen.getByTestId("journal-list");
     expect(screen.getByText(/Найдено:/)).toHaveTextContent("1");
-    /* mood=1 отфильтрована из ленты (в панели чип «Тяжело» остаётся — потому within) */
-    expect(within(feed).queryByText("Тяжело")).not.toBeInTheDocument();
+    /* mood=1 отфильтрована из ленты — в ленте не должно остаться ни одного «Тяжело».
+     * Запрос по data-testid: текст «Тяжело» в чипах фильтров рендерится ВНЕ ленты. */
+    const moods = within(feed).queryAllByTestId("journal-entry-mood");
+    expect(moods.some((el) => el.textContent?.includes("Тяжело"))).toBe(false);
   });
 });
