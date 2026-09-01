@@ -52,7 +52,6 @@ export default function JournalScreen() {
       }
     }
     // потребление — однократное при входе на экран
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* сериализация фильтров в hash (replace — не ломает историю браузера) */

@@ -44,7 +44,6 @@ function DeepLinkBridge() {
     window.addEventListener("hashchange", apply);
     return () => window.removeEventListener("hashchange", apply);
     // намеренно: реагируем только на загрузку, смену пользователя и hashchange
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [app.booted, userId]);
 
   return null;

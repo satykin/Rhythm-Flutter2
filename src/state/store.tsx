@@ -8,7 +8,7 @@ import { db, sessionStore } from "../lib/db";
 import { data, type AuthUser } from "../lib/data";
 import { seedFor } from "../lib/seed";
 import { googleProvider } from "../lib/sync";
-import { clamp, demoHash, hmToMin, nowMin, todayKey, uid } from "../lib/time";
+import { clamp, hmToMin, todayKey, uid } from "../lib/time";
 import { parseRRule, occurrences } from "../features/timeline/recurrence";
 import { act } from "../features/suggestions/data/SuggestionRepository";
 import { reschedulePlan } from "../features/suggestions/domain/reschedule";
