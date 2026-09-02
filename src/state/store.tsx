@@ -276,7 +276,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       await withTimeout(refreshFromDb(user.id), 10_000, "загрузка данных");
     } catch (e) {
       const msg = e instanceof Error && e.message ? e.message : "неизвестная ошибка";
-      throw new Error(`Не удалось загрузить данные (${msg}). Попробуйте ещё раз.`);
+      /* preserve-caught-error: причина пробрасывается в cause (для логов/отладки).
+       * Object.assign — вместо двухаргументного конструктора Error (lib ES2020). */
+      throw Object.assign(new Error(`Не удалось загрузить данные (${msg}). Попробуйте ещё раз.`), { cause: e });
     }
     patch({ user, tab: "today", sync: { ...initial.sync, syncing: false } });
   }, [patch, refreshFromDb]);
