@@ -24,6 +24,7 @@ import { MoodPromptRepository } from "../features/mood/data/MoodPromptRepository
 import { pickPrompt } from "../features/mood/domain/promptBudget";
 import type { MoodFilters } from "../features/mood/domain/moodFilters";
 import type { OverviewTab } from "../features/mood/domain/deeplinks";
+import { withTimeout } from "../lib/data/withTimeout";
 
 interface AppState {
   booted: boolean;
@@ -268,7 +269,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       themePalette: "default", quietFrom: 22 * 60, quietTo: 8 * 60,
       notifications: { ...DEFAULT_PREFS },
     };
-    await refreshFromDb(user.id);
+    /* Устойчивость входа: загрузка ограничена по времени, любая ошибка БД/сети
+     * превращается в исключение с человекочитаемым текстом (его signIn/signUp
+     * вернут на экран входа вместо вечного спиннера). */
+    try {
+      await withTimeout(refreshFromDb(user.id), 10_000, "загрузка данных");
+    } catch (e) {
+      const msg = e instanceof Error && e.message ? e.message : "неизвестная ошибка";
+      throw new Error(`Не удалось загрузить данные (${msg}). Попробуйте ещё раз.`);
+    }
     patch({ user, tab: "today", sync: { ...initial.sync, syncing: false } });
   }, [patch, refreshFromDb]);
 
@@ -276,7 +285,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const res = await data.signUp(name, email, pass);
     if (res.error || !res.user) return res.error ?? "Не удалось создать аккаунт";
     if (data.kind === "supabase") {
-      await enterRemote(res.user);
+      try {
+        await enterRemote(res.user);
+      } catch (e) {
+        return e instanceof Error ? e.message : "Не удалось загрузить данные — попробуйте ещё раз";
+      }
       return null;
     }
     const local = db.findUserByEmail(email);
@@ -288,7 +301,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const res = await data.signIn(email, pass);
     if (res.error || !res.user) return res.error ?? "Не удалось войти";
     if (data.kind === "supabase") {
-      await enterRemote(res.user);
+      try {
+        await enterRemote(res.user);
+      } catch (e) {
+        /* Ошибка загрузки данных: пользователь не входит, на экране — текст
+         * ошибки, кнопка снова активна. Сессия Supabase сохранена — повтор
+         * входа или перезагрузка страницы повторит загрузку. */
+        return e instanceof Error ? e.message : "Не удалось загрузить данные — попробуйте ещё раз";
+      }
       return null;
     }
     const local = db.findUserByEmail(email);
