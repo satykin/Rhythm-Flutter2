@@ -172,6 +172,40 @@ export const db = {
   insertRoutine(r: Routine) {
     schema.routines.push(r);
   },
+  updateRoutine(r: Routine) {
+    const i = schema.routines.findIndex((x) => x.id === r.id);
+    if (i >= 0) schema.routines[i] = r;
+  },
+  removeRoutine(id: string) {
+    schema.routines = schema.routines.filter((r) => r.id !== id);
+  },
+
+  /**
+   * Гидратация локального кэша из удалённых данных (Фаза 1.5b).
+   * Заменяет коллекции пользователя на полученные из Supabase, чтобы вся
+   * нижестоящая логика (scheduler, materialize, корреляции) видела
+   * актуальные данные. Вызывается только в remote-режиме.
+   */
+  hydrateUser(
+    userId: string,
+    remote: {
+      tasks: Task[];
+      routines: Routine[];
+      focusSessions: FocusSession[];
+      suggestions: Suggestion[];
+      templates: TaskTemplate[];
+      slots: ProductivitySlot[];
+      moods: MoodLog[];
+    }
+  ) {
+    schema.tasks = [...schema.tasks.filter((t) => t.userId !== userId), ...remote.tasks];
+    schema.routines = [...schema.routines.filter((r) => r.userId !== userId), ...remote.routines];
+    schema.focus_sessions = [...schema.focus_sessions.filter((s) => s.userId !== userId), ...remote.focusSessions];
+    schema.suggestions = [...schema.suggestions.filter((s) => s.userId !== userId), ...remote.suggestions];
+    schema.task_templates = [...schema.task_templates.filter((t) => t.userId !== userId), ...remote.templates];
+    schema.user_productivity_slots = [...schema.user_productivity_slots.filter((s) => s.userId !== userId), ...remote.slots];
+    schema.mood_logs = [...schema.mood_logs.filter((m) => m.userId !== userId), ...remote.moods];
+  },
 
   /* ---------- mood_logs ---------- */
   moodsOf(userId: string): MoodLog[] {

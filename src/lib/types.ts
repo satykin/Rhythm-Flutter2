@@ -84,6 +84,28 @@ export interface Routine {
   days: number[];
 }
 
+/** routine_completions — отметки выполнения привычек по дням */
+export interface RoutineCompletion {
+  id: string;
+  userId: string;
+  routineId: string;
+  /** YYYY-MM-DD */
+  date: string;
+  /** ISO */
+  completedAt: string;
+}
+
+/** daily_stats — дневные агрегаты (задачи/фокус/настроение) */
+export interface DailyStat {
+  userId: string;
+  /** YYYY-MM-DD */
+  date: string;
+  tasksDone: number;
+  focusMin: number;
+  moodAvg: number | null;
+  computedAt: string;
+}
+
 /** Происхождение записи (Журнал 2.1, §4) */
 export type MoodSource = "manual" | "post_focus" | "morning" | "evening";
 
