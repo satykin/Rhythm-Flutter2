@@ -7,8 +7,8 @@
 import { db, sessionStore } from "../db";
 import { demoHash, uid } from "../time";
 import { DEFAULT_PREFS } from "./defaults";
-import type { User } from "../types";
-import type { AuthResult, AuthUser, DataProvider } from "./types";
+import type { RoutineCompletion, User } from "../types";
+import type { AuthResult, AuthUser, DataProvider, ProfilePatch } from "./types";
 
 const toAuthUser = (u: User): AuthUser => ({
   id: u.id,
@@ -102,5 +102,148 @@ export function createLocalProvider(): DataProvider {
         await db.commit();
       },
     },
+
+    /* ---------- Фаза 1.5b: делегирование в локальный кэш ---------- */
+
+    tasks: {
+      async list(userId) {
+        return db.tasksOf(userId);
+      },
+      async upsert(task) {
+        if (db.tasksOf(task.userId).some((t) => t.id === task.id)) db.updateTask(task);
+        else db.insertTask(task);
+        await db.commit();
+        return task;
+      },
+      async remove(_userId, id) {
+        db.removeTask(id);
+        await db.commit();
+      },
+    },
+
+    routines: {
+      async list(userId) {
+        return db.routinesOf(userId);
+      },
+      async upsert(routine) {
+        if (db.routinesOf(routine.userId).some((r) => r.id === routine.id)) db.updateRoutine(routine);
+        else db.insertRoutine(routine);
+        await db.commit();
+        return routine;
+      },
+      async remove(_userId, id) {
+        db.removeRoutine(id);
+        await db.commit();
+      },
+      /* демо-режим: отметки привычек не персистятся (store их не читает) */
+      async listCompletions() {
+        return localCompletions;
+      },
+      async insertCompletion(c: RoutineCompletion) {
+        localCompletions = [...localCompletions.filter((x) => x.id !== c.id), c];
+      },
+      async removeCompletion(_userId, id) {
+        localCompletions = localCompletions.filter((x) => x.id !== id);
+      },
+    },
+
+    focus: {
+      async list(userId) {
+        return db.focusSessionsOf(userId);
+      },
+      async insert(session) {
+        db.insertFocusSession(session);
+        await db.commit();
+        return session;
+      },
+    },
+
+    suggestions: {
+      async list(userId) {
+        return db.suggestionsOf(userId);
+      },
+      async upsert(s) {
+        if (db.suggestionsOf(s.userId).some((x) => x.id === s.id)) db.updateSuggestion(s);
+        else db.insertSuggestion(s);
+        await db.commit();
+        return s;
+      },
+      async remove(_userId, id) {
+        db.removeSuggestion(id);
+        await db.commit();
+      },
+      async listFeedback(userId) {
+        return db.feedbackOf(userId);
+      },
+      async insertFeedback(f) {
+        db.insertFeedback(f);
+        await db.commit();
+      },
+    },
+
+    profiles: {
+      async get(userId) {
+        const u = db.get().users.find((x) => x.id === userId);
+        if (!u) return null;
+        return {
+          displayName: u.name,
+          accent: u.accent,
+          themePalette: u.themePalette,
+          sleepHours: u.sleepHours,
+          quietFrom: u.quietFrom,
+          quietTo: u.quietTo,
+        } satisfies ProfilePatch;
+      },
+      async upsert(userId, p) {
+        const u = db.get().users.find((x) => x.id === userId);
+        if (!u) return;
+        db.updateUser({
+          ...u,
+          name: p.displayName ?? u.name,
+          accent: (p.accent as User["accent"]) ?? u.accent,
+          themePalette: (p.themePalette as User["themePalette"]) ?? u.themePalette,
+          sleepHours: p.sleepHours ?? u.sleepHours,
+          quietFrom: p.quietFrom ?? u.quietFrom,
+          quietTo: p.quietTo ?? u.quietTo,
+        });
+        await db.commit();
+      },
+    },
+
+    slots: {
+      async list(userId) {
+        return db.slotsOf(userId);
+      },
+      async upsert(userId, slots) {
+        db.upsertSlots(userId, slots);
+        await db.commit();
+      },
+    },
+
+    dailyStats: {
+      /* демо-режим: агрегаты не считаются локально */
+      async list() {
+        return [];
+      },
+    },
+
+    templates: {
+      async list(userId) {
+        return db.templatesOf(userId);
+      },
+      async upsert(t) {
+        if (db.templatesOf(t.userId).some((x) => x.id === t.id)) db.removeTemplate(t.id);
+        db.insertTemplate(t);
+        await db.commit();
+        return t;
+      },
+      async remove(_userId, id) {
+        db.removeTemplate(id);
+        await db.commit();
+      },
+    },
   };
 }
+
+/* in-memory для демо-режима (вне персиста) */
+let localCompletions: RoutineCompletion[] = [];

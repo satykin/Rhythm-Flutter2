@@ -25,6 +25,9 @@ import { pickPrompt } from "../features/mood/domain/promptBudget";
 import type { MoodFilters } from "../features/mood/domain/moodFilters";
 import type { OverviewTab } from "../features/mood/domain/deeplinks";
 import { withTimeout } from "../lib/data/withTimeout";
+import { offlineQueue, isNetworkLikeError, type QueueOp, type QueueTable } from "../lib/data/offlineQueue";
+import type { ProfilePatch } from "../lib/data/types";
+import type { RoutineCompletion, SuggestionFeedback } from "../lib/types";
 
 interface AppState {
   booted: boolean;
@@ -203,24 +206,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  /* Подсказки: генерация кандидатов + дедупликация по ключу.
-   * Фаза 1.5a: moods — из активного DataProvider (Supabase или локально),
-   * остальные таблицы пока локальные (перевод в 1.5b/1.5c). */
-  const refreshFromDb = useCallback(async (userId: string) => {
-    materializeRecurrences(userId);
-    const suggestions = runScheduler(userId);
-    const moods = data.kind === "supabase" ? await data.moods.list(userId) : db.moodsOf(userId);
-    patch({
-      tasks: db.tasksOf(userId).sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin),
-      routines: db.routinesOf(userId),
-      moods,
-      templates: db.templatesOf(userId),
-      suggestions,
-      focusSessions: db.focusSessionsOf(userId),
-      promptSettings: MoodPromptRepository.getSettings(userId),
-    });
-  }, [materializeRecurrences, patch]);
-
   const toast = useCallback((kind: Toast["kind"], text: string, actions?: ToastAction[]) => {
     const id = toastId.current++;
     setState((s) => ({ ...s, toasts: [...s.toasts.slice(-3), { id, kind, text, actions }] }));
@@ -229,9 +214,133 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }, actions ? 7000 : 3800);
   }, []);
 
+  const netToastAt = useRef(0);
+  const netToast = useCallback((kind: Toast["kind"], text: string) => {
+    /* троттлинг сетевых тостов: не чаще раза в 5 секунд */
+    const now = Date.now();
+    if (now - netToastAt.current < 5000) return;
+    netToastAt.current = now;
+    toast(kind, text);
+  }, [toast]);
+
+  /* Подсказки: генерация кандидатов + дедупликация по ключу.
+   * Фаза 1.5b: в remote-режиме ВСЕ чтения — через DataProvider; результат
+   * гидрирует локальный кэш, и нижестоящая логика (scheduler, materialize,
+   * корреляции) работает с актуальными данными. Сбой сети → работаем с кэшем. */
+  const refreshFromDb = useCallback(async (userId: string) => {
+    if (data.kind === "supabase") {
+      try {
+        const [tasks, routines, focusSessions, suggestionsRemote, templates, slots, moods] = await Promise.all([
+          data.tasks.list(userId),
+          data.routines.list(userId),
+          data.focus.list(userId),
+          data.suggestions.list(userId),
+          data.templates.list(userId),
+          data.slots.list(userId),
+          data.moods.list(userId),
+        ]);
+        db.hydrateUser(userId, { tasks, routines, focusSessions, suggestions: suggestionsRemote, templates, slots, moods });
+        await db.commit();
+      } catch (e) {
+        netToast("error", e instanceof Error ? e.message : "Не удалось загрузить данные — показан кэш");
+      }
+    }
+    materializeRecurrences(userId);
+    const suggestions = runScheduler(userId);
+    patch({
+      tasks: db.tasksOf(userId).sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin),
+      routines: db.routinesOf(userId),
+      moods: db.moodsOf(userId),
+      templates: db.templatesOf(userId),
+      suggestions,
+      focusSessions: db.focusSessionsOf(userId),
+      promptSettings: MoodPromptRepository.getSettings(userId),
+    });
+  }, [materializeRecurrences, netToast, patch]);
+
   const dismissToast = useCallback((id: number) => {
     setState((s) => ({ ...s, toasts: s.toasts.filter((t) => t.id !== id) }));
   }, []);
+
+  /**
+   * Зеркалирует локальную запись в Supabase (fire-and-forget: UI уже
+   * обновлён оптимистично). Сетевая ошибка → операция в офлайн-очередь
+   * + тост «синхронизирую позже»; логическая ошибка → тост сразу (не глотаем).
+   */
+  const mirrorRemote = useCallback((
+    userId: string,
+    table: QueueTable,
+    kind: "upsert" | "delete",
+    payload: Record<string, unknown>,
+    op: () => Promise<unknown>
+  ) => {
+    if (data.kind !== "supabase") return;
+    op().catch((e) => {
+      if (isNetworkLikeError(e)) {
+        offlineQueue.push({ userId, table, kind, payload });
+        netToast("info", "Нет связи с сервером — синхронизирую позже");
+      } else {
+        netToast("error", e instanceof Error ? e.message : "Ошибка синхронизации");
+      }
+    });
+  }, [netToast]);
+
+  /** Повтор операции из офлайн-очереди через провайдер. */
+  const replayOp = useCallback((op: QueueOp): Promise<unknown> => {
+    const p = op.payload as Record<string, unknown>;
+    switch (op.table) {
+      case "tasks":
+        return op.kind === "delete"
+          ? data.tasks.remove(op.userId, p.id as string)
+          : data.tasks.upsert(p as unknown as Task);
+      case "routines":
+        return op.kind === "delete"
+          ? data.routines.remove(op.userId, p.id as string)
+          : data.routines.upsert(p as unknown as Routine);
+      case "routine_completions":
+        return op.kind === "delete"
+          ? data.routines.removeCompletion(op.userId, p.id as string)
+          : data.routines.insertCompletion(p as unknown as RoutineCompletion);
+      case "focus_sessions":
+        return data.focus.insert(p as unknown as FocusSession);
+      case "suggestions":
+        return op.kind === "delete"
+          ? data.suggestions.remove(op.userId, p.id as string)
+          : data.suggestions.upsert(p as unknown as Suggestion);
+      case "suggestion_feedback":
+        return data.suggestions.insertFeedback(p as unknown as SuggestionFeedback);
+      case "user_profiles":
+        return data.profiles.upsert(op.userId, p as unknown as ProfilePatch);
+      case "task_templates":
+        return op.kind === "delete"
+          ? data.templates.remove(op.userId, p.id as string)
+          : data.templates.upsert(p as unknown as TaskTemplate);
+    }
+  }, []);
+
+  /** Слив офлайн-очереди: при входе и по событию 'online'. */
+  const flushOffline = useCallback(async () => {
+    const u = stateRef.current.user;
+    if (data.kind !== "supabase" || !u) return;
+    const ops = offlineQueue.list(u.id);
+    if (!ops.length) return;
+    let done = 0;
+    for (const op of ops) {
+      try {
+        await replayOp(op);
+        offlineQueue.remove(u.id, op.id);
+        done++;
+      } catch (e) {
+        if (isNetworkLikeError(e)) break; /* всё ещё офлайн — остаток ждёт */
+        offlineQueue.remove(u.id, op.id); /* перманентная ошибка — сбрасываем, чтобы не клинить */
+        done++;
+      }
+    }
+    if (done > 0) {
+      await refreshFromDb(u.id);
+      toast("success", `Синхронизировано изменений: ${done}`);
+    }
+  }, [refreshFromDb, replayOp, toast]);
 
   const seedInto = useCallback((user: User) => {
     const seeded = seedFor(user);
