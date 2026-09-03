@@ -59,12 +59,23 @@ export function resolveSlot(
     }
   }
 
-  /* назад */
+  /* назад — допустим, только если запрошенное начало РАНЬШЕ старта первой
+   * пересекающей задачи (есть куда «подвинуться» до неё). Если начало уже
+   * внутри занятой цепочки — единственный осмысленный ход вперёд:backward
+   * не рассматриваем, чтобы перепрыгнуть ВСЮ цепочку (фикс 8, тест L16). */
+  let earliestCollidingStart = Infinity;
+  for (const o of occupied) {
+    if (s0 < o.endMin && s0 + dur > o.startMin) earliestCollidingStart = Math.min(earliestCollidingStart, o.startMin);
+  }
+  const canGoBack = s0 < earliestCollidingStart;
+
   let backward: number | null = null;
-  for (let s = s0 - STEP; s >= dayStart; s -= STEP) {
-    if (!collides(occupied, s, dur)) {
-      backward = s;
-      break;
+  if (canGoBack) {
+    for (let s = s0 - STEP; s >= dayStart; s -= STEP) {
+      if (!collides(occupied, s, dur)) {
+        backward = s;
+        break;
+      }
     }
   }
 
