@@ -1,23 +1,39 @@
-import React, { useState } from "react";
+import React, { lazy, Suspense, useState } from "react";
 import { AppProvider, useApp } from "./state/store";
 import Shell from "./components/Shell";
-import AuthScreen from "./components/AuthScreen";
-import TodayScreen from "./components/TodayScreen";
-import RhythmScreen from "./components/RhythmScreen";
-import CharacterScreen from "./components/CharacterScreen";
-import TogetherScreen from "./components/TogetherScreen";
-import FlowScreen from "./features/flow/FlowScreen";
-import JournalScreen from "./features/mood/presentation/JournalScreen";
-import MoodCheckInSheet from "./features/mood/presentation/MoodCheckInSheet";
-import MoodOverviewScreen from "./features/mood/presentation/MoodOverviewScreen";
-import InsightsScreen from "./features/insights/InsightsScreen";
-import TaskModal, { TaskDraft } from "./components/TaskModal";
+import { Spinner } from "./components/ui";
 import { LogoMark } from "./components/icons";
 import { todayKey } from "./lib/time";
 import { useHotkeys } from "./shared/hooks/useHotkeys";
 import { parseMoodRoute, routeTab } from "./features/mood/domain/deeplinks";
 import { deserializeFilters } from "./features/mood/domain/moodFilters";
 import type { TabId, Task } from "./lib/types";
+import type { TaskDraft } from "./components/TaskModal";
+
+/* ---------- code-splitting (гигиена-спринт, пункт 2) ----------
+ * Экраны вкладок и экранные модалки грузятся лениво: главный чанк
+ * < 500 КБ, recharts автоматически выделяется в чанки
+ * Insights/MoodOverview. Сегодня/Shell/auth-состояние — eagerly. */
+const AuthScreen = lazy(() => import("./components/AuthScreen"));
+const TodayScreen = lazy(() => import("./components/TodayScreen"));
+const RhythmScreen = lazy(() => import("./components/RhythmScreen"));
+const CharacterScreen = lazy(() => import("./components/CharacterScreen"));
+const TogetherScreen = lazy(() => import("./components/TogetherScreen"));
+const FlowScreen = lazy(() => import("./features/flow/FlowScreen"));
+const JournalScreen = lazy(() => import("./features/mood/presentation/JournalScreen"));
+const MoodOverviewScreen = lazy(() => import("./features/mood/presentation/MoodOverviewScreen"));
+const InsightsScreen = lazy(() => import("./features/insights/InsightsScreen"));
+const MoodCheckInSheet = lazy(() => import("./features/mood/presentation/MoodCheckInSheet"));
+const TaskModal = lazy(() => import("./components/TaskModal"));
+
+function ScreenLoader() {
+  return (
+    <div className="anim-fade flex min-h-[50vh] flex-col items-center justify-center gap-3">
+      <Spinner size={22} className="text-vio-300" />
+      <p className="text-[12px] font-semibold text-mist-500">Загружаем экран…</p>
+    </div>
+  );
+}
 
 /**
  * Мост hash-роутинга (Фаза F, §4): #/mood, #/mood/journal?filters=...,
@@ -97,7 +113,9 @@ function Body() {
   if (!app.user)
     return (
       <>
-        <AuthScreen />
+        <Suspense fallback={<ScreenLoader />}>
+          <AuthScreen />
+        </Suspense>
         <div className="rhythm-bg" />
       </>
     );
@@ -111,17 +129,21 @@ function Body() {
       <div className="rhythm-bg" />
       <DeepLinkBridge />
       <Shell onNewTask={() => openNew()} onHelp={() => setHelpOpen(true)} helpOpen={helpOpen} onCloseHelp={() => setHelpOpen(false)}>
-        {app.tab === "today" && <TodayScreen onEdit={openEdit} onNewAt={(date, startMin, endMin) => openNew({ date, startMin, endMin })} />}
-        {app.tab === "flow" && <FlowScreen />}
-        {app.tab === "rhythm" && <RhythmScreen onPlanSlot={(start, end) => openNew({ date: todayKey(), startMin: start, endMin: end })} />}
-        {app.tab === "journal" && <JournalScreen />}
-        {app.tab === "mood" && <MoodOverviewScreen />}
-        {app.tab === "character" && <CharacterScreen />}
-        {app.tab === "together" && <TogetherScreen />}
-        {app.tab === "insights" && <InsightsScreen />}
+        <Suspense fallback={<ScreenLoader />}>
+          {app.tab === "today" && <TodayScreen onEdit={openEdit} onNewAt={(date, startMin, endMin) => openNew({ date, startMin, endMin })} />}
+          {app.tab === "flow" && <FlowScreen />}
+          {app.tab === "rhythm" && <RhythmScreen onPlanSlot={(start, end) => openNew({ date: todayKey(), startMin: start, endMin: end })} />}
+          {app.tab === "journal" && <JournalScreen />}
+          {app.tab === "mood" && <MoodOverviewScreen />}
+          {app.tab === "character" && <CharacterScreen />}
+          {app.tab === "together" && <TogetherScreen />}
+          {app.tab === "insights" && <InsightsScreen />}
+        </Suspense>
       </Shell>
-      <TaskModal open={modal.open} task={modal.task} draft={modal.draft} onClose={close} />
-      <MoodCheckInSheet />
+      <Suspense fallback={null}>
+        <TaskModal open={modal.open} task={modal.task} draft={modal.draft} onClose={close} />
+        <MoodCheckInSheet />
+      </Suspense>
     </>
   );
 }

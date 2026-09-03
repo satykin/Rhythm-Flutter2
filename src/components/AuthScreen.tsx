@@ -148,7 +148,7 @@ export default function AuthScreen() {
 
         <div className="anim-rise d-4 flex items-center gap-2.5 text-[12px] font-semibold text-mist-500">
           <I n="shield" size={15} className="text-aqua-400" />
-          Данные шифруются и никогда не продаются. Локальная обработка — по умолчанию.
+          Данные никогда не продаются и не используются для рекламы. Локальная обработка — по умолчанию.
         </div>
       </aside>
 
@@ -254,7 +254,7 @@ export default function AuthScreen() {
 
           <p className="anim-rise d-2 mt-4 text-center text-[11.5px] leading-relaxed text-mist-500">
             Демо-режим: аккаунт и данные хранятся локально в браузере.
-            <br />В проде — Supabase Auth + end-to-end шифрование.
+            <br />В проде — Supabase Auth; данные хранятся в твоём аккаунте и защищены политиками доступа (RLS).
           </p>
         </div>
       </main>
