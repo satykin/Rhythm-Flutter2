@@ -405,12 +405,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       syncStatus: connected ? "pending" : "local",
       createdAt: now, updatedAt: now,
     };
-    db.insertTask(task);
-    if (task.recurrenceRule) materializeRecurrences(u.id);
-    void db.commit();
+    /* Ошибки записи задачи не глотаем: показываем тост (контур фикса ошибок). */
+    try {
+      db.insertTask(task);
+      if (task.recurrenceRule) materializeRecurrences(u.id);
+      void db.commit();
+    } catch (e) {
+      toast("error", `Не удалось сохранить задачу: ${e instanceof Error ? e.message : "неизвестная ошибка"}`);
+    }
     refreshFromDb(u.id);
     return task;
-  }, [materializeRecurrences, refreshFromDb]);
+  }, [materializeRecurrences, refreshFromDb, toast]);
 
   const updateTask = useCallback((id: string, p: Partial<Task>) => {
     const u = stateRef.current.user!;
@@ -421,29 +426,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ...t, ...p, updatedAt: new Date().toISOString(),
       syncStatus: connected && !t.parentTaskId ? "pending" : t.syncStatus,
     };
-    db.updateTask(next);
-    if (next.recurrenceRule && !next.parentTaskId) materializeRecurrences(u.id);
-    void db.commit();
+    try {
+      db.updateTask(next);
+      if (next.recurrenceRule && !next.parentTaskId) materializeRecurrences(u.id);
+      void db.commit();
+    } catch (e) {
+      toast("error", `Не удалось обновить задачу: ${e instanceof Error ? e.message : "неизвестная ошибка"}`);
+    }
     refreshFromDb(u.id);
-  }, [materializeRecurrences, refreshFromDb]);
+  }, [materializeRecurrences, refreshFromDb, toast]);
 
   const removeTask = useCallback((id: string) => {
     const st = stateRef.current;
     const u = st.user!;
     const t = db.tasksOf(u.id).find((x) => x.id === id);
-    db.removeTask(id);
-    /* Tombstone: удалённое событие календаря не должно вернуться при следующем pull. */
-    if (t?.externalId) {
-      const removed = st.sync.removedExternalIds ?? [];
-      if (!removed.includes(t.externalId)) {
-        const sync = { ...st.sync, removedExternalIds: [...removed, t.externalId] };
-        patch({ sync });
-        persistSync(sync);
+    try {
+      db.removeTask(id);
+      /* Tombstone: удалённое событие календаря не должно вернуться при следующем pull. */
+      if (t?.externalId) {
+        const removed = st.sync.removedExternalIds ?? [];
+        if (!removed.includes(t.externalId)) {
+          const sync = { ...st.sync, removedExternalIds: [...removed, t.externalId] };
+          patch({ sync });
+          persistSync(sync);
+        }
       }
+      void db.commit();
+    } catch (e) {
+      toast("error", `Не удалось удалить задачу: ${e instanceof Error ? e.message : "неизвестная ошибка"}`);
     }
-    void db.commit();
     refreshFromDb(u.id);
-  }, [patch, persistSync, refreshFromDb]);
+  }, [patch, persistSync, refreshFromDb, toast]);
 
   const setTaskStatus = useCallback((id: string, status: TaskStatus) => {
     updateTask(id, { status });
