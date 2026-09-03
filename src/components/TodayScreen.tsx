@@ -127,8 +127,11 @@ export default function TodayScreen({
     dragRef.current = null;
     if (!d) return;
     if (d.moved && drag) {
-      app.updateTask(d.id, { startMin: drag.startMin, endMin: drag.endMin });
-      app.toast("info", `«${t.title}» → ${minToHM(drag.startMin)}–${minToHM(drag.endMin)}`);
+      const applied = app.updateTask(d.id, { startMin: drag.startMin, endMin: drag.endMin });
+      /* если слот был занят, store уже показал тост с фактическим временем */
+      if (applied && applied.startMin === drag.startMin) {
+        app.toast("info", `«${t.title}» → ${minToHM(applied.startMin)}–${minToHM(applied.endMin)}`);
+      }
     } else if (!d.moved && d.mode === "move") {
       onEdit(t);
     }

@@ -8,8 +8,9 @@ import { db, sessionStore } from "../lib/db";
 import { data, type AuthUser } from "../lib/data";
 import { seedFor } from "../lib/seed";
 import { googleProvider } from "../lib/sync";
-import { clamp, hmToMin, todayKey, uid } from "../lib/time";
+import { clamp, hmToMin, minToHM, todayKey, uid, DAY_END } from "../lib/time";
 import { parseRRule, occurrences } from "../features/timeline/recurrence";
+import { resolveSlot } from "../features/timeline/conflicts";
 import { act } from "../features/suggestions/data/SuggestionRepository";
 import { reschedulePlan } from "../features/suggestions/domain/reschedule";
 import { productivityWindows } from "../features/suggestions/suggestionService";
@@ -113,8 +114,8 @@ interface Ctx extends AppState {
   signOut: () => Promise<void>;
   updateUser: (patch: Partial<User>) => void;
 
-  addTask: (input: NewTaskInput) => Task;
-  updateTask: (id: string, patch: Partial<Task>) => void;
+  addTask: (input: NewTaskInput) => Task | null;
+  updateTask: (id: string, patch: Partial<Task>) => Task | null;
   removeTask: (id: string) => void;
   setTaskStatus: (id: string, status: TaskStatus) => void;
   applyRoutine: (r: Routine) => { time: number } | null;
@@ -514,12 +515,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [patch]);
 
   /* ---------- tasks ---------- */
-  const addTask = useCallback((input: NewTaskInput) => {
+  const addTask = useCallback((input: NewTaskInput): Task | null => {
     const u = stateRef.current.user!;
+    /* Разведение по слотам (фикс 7): одновременно — одна задача.
+     * Занятый интервал → авто-сдвиг на ближайший свободный слот + тост;
+     * нет окна до конца дня → задача не создаётся, предупреждение.
+     * Skipped-задачи не считаются занятыми: пропуск освобождает время. */
+    const occupied = db
+      .tasksOf(u.id)
+      .filter((x) => x.date === input.date && !x.recurrenceRule && x.status !== "skipped");
+    const resolved = resolveSlot(occupied, input.startMin, input.endMin - input.startMin);
+    if (!resolved) {
+      toast("error", "Не нашёл свободного окна до конца дня — задача не создана");
+      return null;
+    }
+    const placed = resolved.moved ? { ...input, startMin: resolved.startMin, endMin: resolved.endMin } : input;
+    if (resolved.moved) toast("info", `Слот был занят — перенёс на ${minToHM(resolved.startMin)}`);
+
     const connected = stateRef.current.sync.connected;
     const now = new Date().toISOString();
     const task: Task = {
-      id: uid(), userId: u.id, ...input,
+      id: uid(), userId: u.id, ...placed,
       status: "todo", source: "local",
       syncStatus: connected ? "pending" : "local",
       createdAt: now, updatedAt: now,
@@ -538,10 +554,38 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return task;
   }, [materializeRecurrences, mirrorRemote, refreshFromDb, toast]);
 
-  const updateTask = useCallback((id: string, p: Partial<Task>) => {
+  const updateTask = useCallback((id: string, p: Partial<Task>): Task | null => {
     const u = stateRef.current.user!;
     const t = db.tasksOf(u.id).find((x) => x.id === id);
-    if (!t) return;
+    if (!t) return null;
+
+    /* Разведение по слотам (фикс 7): перенос/смена дня — авто-сдвиг при
+     * пересечении; resize — кламп до ближайшей следующей задачи. */
+    const dateChanged = p.date !== undefined && p.date !== t.date;
+    const startChanged = p.startMin !== undefined && p.startMin !== t.startMin;
+    if (dateChanged || startChanged) {
+      const targetDate = p.date ?? t.date;
+      const dur = (p.endMin ?? t.endMin) - (p.startMin ?? t.startMin);
+      const occupied = db
+        .tasksOf(u.id)
+        .filter((x) => x.date === targetDate && x.id !== id && !x.recurrenceRule && x.status !== "skipped");
+      const resolved = resolveSlot(occupied, p.startMin ?? t.startMin, dur);
+      if (!resolved) {
+        toast("error", "Не нашёл свободного окна до конца дня — перенос отменён");
+        return null;
+      }
+      if (resolved.moved) {
+        p = { ...p, startMin: resolved.startMin, endMin: resolved.startMin + dur };
+        toast("info", `Слот был занят — перенёс на ${minToHM(resolved.startMin)}`);
+      }
+    } else if (p.endMin !== undefined && p.endMin !== t.endMin) {
+      const occupied = db
+        .tasksOf(u.id)
+        .filter((x) => x.date === t.date && x.id !== id && !x.recurrenceRule && x.status !== "skipped" && x.startMin > t.startMin);
+      const limit = occupied.length ? Math.min(...occupied.map((x) => x.startMin)) : DAY_END;
+      p = { ...p, endMin: clamp(p.endMin, t.startMin + 15, limit) };
+    }
+
     const connected = stateRef.current.sync.connected;
     const next: Task = {
       ...t, ...p, updatedAt: new Date().toISOString(),
@@ -556,6 +600,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
     mirrorRemote(u.id, "tasks", "upsert", next as unknown as Record<string, unknown>, () => data.tasks.upsert(next));
     refreshFromDb(u.id);
+    return next;
   }, [materializeRecurrences, mirrorRemote, refreshFromDb, toast]);
 
   const removeTask = useCallback((id: string) => {
@@ -595,12 +640,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     let guard = 0;
     while (overlaps(start, start + r.durationMin) && guard++ < 60 && start <= maxStart) start += 15;
     if (overlaps(start, start + r.durationMin) || start > maxStart) return null;
-    addTask({
+    const created = addTask({
       title: r.title, description: "", date: today,
       startMin: start, endMin: start + r.durationMin,
       color: r.color, icon: r.icon, tags: ["рутина"], energy: "low",
     });
-    return { time: start };
+    return created ? { time: created.startMin } : null;
   }, [addTask]);
 
   /* ---------- mood (Журнал 2.1, Фаза A; с Фаза 1.5a — через DataProvider) ----------
@@ -775,9 +820,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const session: FocusSession = { ...s, id: uid(), userId: u.id, date: s.startedAt.slice(0, 10) };
     db.insertFocusSession(session);
     void db.commit();
+    /* Фикс 7: без зеркала строка терялась в Supabase-режиме (refreshFromDb
+     * перечитывает focus_sessions с сервера). Офлайн → очередь. */
+    mirrorRemote(u.id, "focus_sessions", "upsert", session as unknown as Record<string, unknown>, () => data.focus.insert(session));
     refreshFromDb(u.id);
     return session;
-  }, [refreshFromDb]);
+  }, [mirrorRemote, refreshFromDb]);
 
   /* ---------- templates ---------- */
   const addTemplate = useCallback((t: Omit<TaskTemplate, "id" | "userId">) => {
