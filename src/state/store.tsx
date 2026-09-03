@@ -390,7 +390,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       throw Object.assign(new Error(`Не удалось загрузить данные (${msg}). Попробуйте ещё раз.`), { cause: e });
     }
     patch({ user, tab: "today", sync: { ...initial.sync, syncing: false } });
-  }, [patch, refreshFromDb]);
+    /* Фаза 1.5b: вход/восстановление сессии — сливаем накопленную офлайн-очередь. */
+    void flushOffline();
+  }, [flushOffline, patch, refreshFromDb]);
 
   const signUp = useCallback(async (name: string, email: string, pass: string) => {
     const res = await data.signUp(name, email, pass);
@@ -491,8 +493,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (u) void enterRemote(u);
       else patch({ user: null, tasks: [], routines: [], moods: [], templates: [], suggestions: [], focusSessions: [], tab: "today", sync: initial.sync, syncLog: [] });
     });
-    return unsubscribe;
-  }, [enterRemote, patch, refreshFromDb, seedInto]);
+
+    /* Фаза 1.5b: возвращение сети — сливаем офлайн-очередь. */
+    const onOnline = () => void flushOffline();
+    window.addEventListener("online", onOnline);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener("online", onOnline);
+    };
+  }, [enterRemote, flushOffline, patch, refreshFromDb, seedInto]);
 
   const updateUser = useCallback((p: Partial<User>) => {
     const u = stateRef.current.user;
@@ -522,9 +532,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       toast("error", `Не удалось сохранить задачу: ${e instanceof Error ? e.message : "неизвестная ошибка"}`);
     }
+    /* Фаза 1.5b: зеркалируем в Supabase (в remote-режиме); офлайн → очередь. */
+    mirrorRemote(u.id, "tasks", "upsert", task as unknown as Record<string, unknown>, () => data.tasks.upsert(task));
     refreshFromDb(u.id);
     return task;
-  }, [materializeRecurrences, refreshFromDb, toast]);
+  }, [materializeRecurrences, mirrorRemote, refreshFromDb, toast]);
 
   const updateTask = useCallback((id: string, p: Partial<Task>) => {
     const u = stateRef.current.user!;
@@ -542,8 +554,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       toast("error", `Не удалось обновить задачу: ${e instanceof Error ? e.message : "неизвестная ошибка"}`);
     }
+    mirrorRemote(u.id, "tasks", "upsert", next as unknown as Record<string, unknown>, () => data.tasks.upsert(next));
     refreshFromDb(u.id);
-  }, [materializeRecurrences, refreshFromDb, toast]);
+  }, [materializeRecurrences, mirrorRemote, refreshFromDb, toast]);
 
   const removeTask = useCallback((id: string) => {
     const st = stateRef.current;
@@ -564,8 +577,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       toast("error", `Не удалось удалить задачу: ${e instanceof Error ? e.message : "неизвестная ошибка"}`);
     }
+    mirrorRemote(u.id, "tasks", "delete", { id }, () => data.tasks.remove(u.id, id));
     refreshFromDb(u.id);
-  }, [patch, persistSync, refreshFromDb, toast]);
+  }, [mirrorRemote, patch, persistSync, refreshFromDb, toast]);
 
   const setTaskStatus = useCallback((id: string, status: TaskStatus) => {
     updateTask(id, { status });
