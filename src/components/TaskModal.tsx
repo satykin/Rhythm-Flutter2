@@ -161,13 +161,16 @@ export default function TaskModal({
       recurrenceRule: recurrence || undefined,
     };
     if (task) {
-      app.updateTask(task.id, payload);
+      const applied = app.updateTask(task.id, payload);
+      if (!applied) return; // нет свободного окна — store показал предупреждение
       app.toast("success", `«${payload.title}» обновлена`);
+      onClose();
     } else {
-      app.addTask(payload);
-      app.toast("success", `«${payload.title}» в плане на ${minToHM(start)}`);
+      const created = app.addTask(payload);
+      if (!created) return; // нет свободного окна — store показал предупреждение, модалка остаётся
+      app.toast("success", `«${payload.title}» в плане на ${minToHM(created.startMin)}`);
+      onClose();
     }
-    onClose();
   };
 
   return (

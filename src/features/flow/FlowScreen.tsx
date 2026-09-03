@@ -21,7 +21,7 @@ import MoodFacePicker from "../mood/presentation/MoodFacePicker";
 import { db } from "../../lib/db";
 import { energyAt } from "../../lib/rhythm";
 import { addDaysKey, clamp, fmtDur, minToHM, nowMin, todayKey } from "../../lib/time";
-import type { FlowType, Task } from "../../lib/types";
+import type { FlowType, FocusSession, Task } from "../../lib/types";
 
 type Phase = "setup" | "countdown" | "focus" | "paused" | "break" | "complete" | "aborted";
 
@@ -45,6 +45,33 @@ const ORDER: FlowType[] = ["deep", "creative", "light", "rest"];
 
 const MIX_KEY = "rhythm.flowmix.v1";
 const ZERO_MIX: Record<AmbientId, number> = { rain: 0, cafe: 0, library: 0, white_noise: 0, forest: 0, waves: 0 };
+
+/**
+ * Чистый расчёт строки focus_sessions из фактических аккумуляторов
+ * (вынесено для юнит-тестов; логика идентична прежней инлайн-версии).
+ */
+export function buildFocusSession(args: {
+  focusSec: number;
+  breakSec: number;
+  cycles: number;
+  type: FlowType;
+  durMin: number;
+  startedAt: string;
+  completed: boolean;
+  sounds: string[];
+}): Omit<FocusSession, "id" | "userId" | "date"> {
+  return {
+    startedAt: args.startedAt,
+    type: args.type,
+    plannedFocusMin: args.type === "rest" ? FLOW_CFG.rest.focusMin : args.durMin,
+    plannedBreakMin: FLOW_CFG[args.type].breakMin,
+    focusMin: Math.round((args.focusSec / 60) * 10) / 10,
+    breakMin: Math.round((args.breakSec / 60) * 10) / 10,
+    cycles: args.cycles,
+    completed: args.completed,
+    sounds: args.sounds,
+  };
+}
 
 const BREAK_TIPS = [
   "Выпей воды",
@@ -210,17 +237,18 @@ export default function FlowScreen() {
     (completed: boolean) => {
       const acc = accRef.current;
       if (acc.focusSec < 60) return; // < 1 минуты — не попадает в статистику (спека §10)
-      const session = app.logFocusSession({
-        startedAt: startedAtRef.current || new Date().toISOString(),
-        type: typeRef.current,
-        plannedFocusMin: typeRef.current === "rest" ? FLOW_CFG.rest.focusMin : durRef.current,
-        plannedBreakMin: FLOW_CFG[typeRef.current].breakMin,
-        focusMin: Math.round((acc.focusSec / 60) * 10) / 10,
-        breakMin: Math.round((acc.breakSec / 60) * 10) / 10,
-        cycles: acc.cycles,
-        completed,
-        sounds: ambient.active(),
-      });
+      const session = app.logFocusSession(
+        buildFocusSession({
+          focusSec: acc.focusSec,
+          breakSec: acc.breakSec,
+          cycles: acc.cycles,
+          type: typeRef.current,
+          durMin: durRef.current,
+          startedAt: startedAtRef.current || new Date().toISOString(),
+          completed,
+          sounds: ambient.active(),
+        })
+      );
       sessionRef.current = session.id;
     },
     [app]
@@ -355,6 +383,10 @@ export default function FlowScreen() {
     ambient.duck(0);
     window.setTimeout(() => ambient.stopAll(), 700);
     setPhase("aborted");
+    /* Фикс 7: таймер — на ноль; аккумуляторы сброшены (итог уже в result). */
+    accRef.current = { focusSec: 0, breakSec: 0, cycles: 0 };
+    extRef.current = 0;
+    halfRef.current = false;
   }, [setPhase]);
 
   const reenter = useCallback(() => {
@@ -1176,43 +1208,61 @@ export default function FlowScreen() {
   );
 }
 
-/* ================= Удержание «Стоп» (защита от случайного тапа) ================= */
-function HoldStop({ onAbort }: { onAbort: () => void }) {
+/* ================= Удержание «Стоп» (защита от случайного тапа) =================
+ * Фикс 7: pointer capture — удержание не «рвётся», если авто-скрытие
+ * контролов включает pointer-events-none или палец чуть съехал;
+ * интервал-фолбэк — rAF полностью паузится в фоновой вкладке. */
+export function HoldStop({ onAbort }: { onAbort: () => void }) {
   const [prog, setProg] = useState(0);
   const raf = useRef(0);
+  const fallback = useRef(0);
   const t0 = useRef(0);
   const active = useRef(false);
 
   const stop = useCallback(() => {
     active.current = false;
     cancelAnimationFrame(raf.current);
+    window.clearInterval(fallback.current);
     setProg(0);
   }, []);
 
-  const loop = useCallback(() => {
+  const tick = useCallback(() => {
     if (!active.current) return;
     const p = Math.min(1, (performance.now() - t0.current) / 1500);
     setProg(p);
     if (p >= 1) {
       stop();
       onAbort();
-      return;
     }
-    raf.current = requestAnimationFrame(loop);
   }, [onAbort, stop]);
 
-  useEffect(() => () => cancelAnimationFrame(raf.current), []);
+  const loop = useCallback(() => {
+    if (!active.current) return;
+    tick();
+    if (active.current) raf.current = requestAnimationFrame(loop);
+  }, [tick]);
+
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(raf.current);
+      window.clearInterval(fallback.current);
+    },
+    []
+  );
 
   return (
     <button
       className="btn relative overflow-hidden !border-bad/40 !bg-bad/10 !text-[#ff9aa8]"
       onPointerDown={(e) => {
         e.preventDefault();
+        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
         active.current = true;
         t0.current = performance.now();
         loop();
+        fallback.current = window.setInterval(tick, 100);
       }}
       onPointerUp={stop}
+      onPointerCancel={stop}
       onPointerLeave={stop}
       title="Удерживай 1.5 секунды"
     >
