@@ -72,17 +72,29 @@ export default function AuthScreen() {
     if (Object.keys(next).length) return;
 
     setBusy("form");
-    const err = mode === "signup" ? await signUp(name.trim(), email.trim(), pass) : await signIn(email.trim(), pass);
-    setBusy(null);
-    if (err) setFormErr(err);
+    /* Устойчивость: любая ошибка (в т.ч. выброшенное исключение) показывает
+     * текст и ГАРАНТИРОВАННО гасит спиннер через finally. */
+    try {
+      const err = mode === "signup" ? await signUp(name.trim(), email.trim(), pass) : await signIn(email.trim(), pass);
+      if (err) setFormErr(err);
+    } catch (e) {
+      setFormErr(e instanceof Error ? e.message : "Не удалось войти — попробуйте ещё раз");
+    } finally {
+      setBusy(null);
+    }
   };
 
   const oauth = async (p: "google" | "apple") => {
     setBusy(p);
     setFormErr(null);
-    const err = await signInWith(p);
-    setBusy(null);
-    if (err) setFormErr(err);
+    try {
+      const err = await signInWith(p);
+      if (err) setFormErr(err);
+    } catch (e) {
+      setFormErr(e instanceof Error ? e.message : "Не удалось войти — попробуйте ещё раз");
+    } finally {
+      setBusy(null);
+    }
   };
 
   const switchMode = (m: Mode) => {
