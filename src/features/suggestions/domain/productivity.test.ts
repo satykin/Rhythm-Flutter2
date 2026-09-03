@@ -97,7 +97,10 @@ describe("productivityWindows — выбор пиков", () => {
     scores[22] = 4;
     const wins = productivityWindows(scores);
     expect(wins).toHaveLength(1);
-    expect(wins[0]).toMatchObject({ start: 600, end: 750, score: 6 });
+    // Правило: все смежные слоты выше порога сливаются в ОДНО окно без
+    // ограничения длины (фильтр — только ≥60 мин). 3 слота (20,21,22) × 30 мин
+    // = 90 мин → end = 20*30 + 3*30 = 690, а не 750 (750 потребовало бы 5 слотов).
+    expect(wins[0]).toMatchObject({ start: 600, end: 690, score: 6 });
   });
 
   it("одиночный слот (30 мин) — не золотое окно", () => {

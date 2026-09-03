@@ -52,7 +52,11 @@ export interface ProductivityWindow {
   score: number;
 }
 
-/** Топ-3 смежных слота со score выше порога = золотые часы. */
+/**
+ * Золотые часы (спека §4.1): все смежные слоты со score выше порога
+ * сливаются в ОДНО окно без ограничения длины; окно короче 60 мин
+ * отбрасывается; возвращается до 3 самых сильных окон за день.
+ */
 export function productivityWindows(scores: number[], opts: { minScore?: number } = {}): ProductivityWindow[] {
   const { minScore = 2 } = opts;
   const windows: ProductivityWindow[] = [];
