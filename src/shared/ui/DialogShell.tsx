@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import { I, type IconName } from "../../components/icons";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 
@@ -7,7 +7,9 @@ import { useFocusTrap } from "../hooks/useFocusTrap";
  *  - role="dialog" + aria-modal, заголовок связан через aria-labelledby;
  *  - фокус-трап (Tab/Shift+Tab по кругу, Esc — закрыть, фокус возвращается);
  *  - появление через opacity/scale — безопасно для Reduce Motion;
- *  - клик по подложке = закрыть.
+ *  - клик по подложке = закрыть (отключается closeOnBackdrop для
+ *    блокирующих модалок — фикс 14: выбор не теряется случайным кликом);
+ *  - lockScroll: страница не прокручивается, пока модалка открыта.
  */
 export default function DialogShell({
   open,
@@ -18,6 +20,8 @@ export default function DialogShell({
   footer,
   width = 480,
   testId,
+  closeOnBackdrop = true,
+  lockScroll = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -28,15 +32,34 @@ export default function DialogShell({
   width?: number;
   /** тестовая инфраструктура: data-testid панели */
   testId?: string;
+  /** блокирующая модалка: клик по фону НЕ закрывает (фикс 14) */
+  closeOnBackdrop?: boolean;
+  /** блокировать прокрутку страницы, пока модалка открыта (фикс 14) */
+  lockScroll?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef, open, onClose);
+
+  /* Блокировка скролла страницы под блокирующей модалкой. */
+  useEffect(() => {
+    if (!open || !lockScroll) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open, lockScroll]);
 
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6">
-      <div className="anim-fade absolute inset-0 bg-ink-950/75 backdrop-blur-[3px]" onClick={onClose} aria-hidden="true" />
+      <div
+        data-testid="dialog-shell-backdrop"
+        className="anim-fade absolute inset-0 bg-ink-950/75 backdrop-blur-[3px]"
+        onClick={closeOnBackdrop ? onClose : undefined}
+        aria-hidden="true"
+      />
       <div
         ref={panelRef}
         role="dialog"
