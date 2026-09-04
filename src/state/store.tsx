@@ -8,9 +8,9 @@ import { db, sessionStore } from "../lib/db";
 import { data, type AuthUser } from "../lib/data";
 import { seedFor } from "../lib/seed";
 import { googleProvider } from "../lib/sync";
-import { clamp, hmToMin, minToHM, todayKey, uid, DAY_END } from "../lib/time";
+import { clamp, hmToMin, todayKey, uid, DAY_END } from "../lib/time";
 import { parseRRule, occurrences } from "../features/timeline/recurrence";
-import { resolveSlot } from "../features/timeline/conflicts";
+import { findCollisions, freeSlotOptions, resolveSlot, type SlotCheckResult } from "../features/timeline/conflicts";
 import { act } from "../features/suggestions/data/SuggestionRepository";
 import { reschedulePlan } from "../features/suggestions/domain/reschedule";
 import { productivityWindows } from "../features/suggestions/suggestionService";
@@ -103,7 +103,7 @@ export interface NewTaskInput {
   recurrenceRule?: string;
 }
 
-interface Ctx extends AppState {
+export interface Ctx extends AppState {
   toast: (kind: Toast["kind"], text: string, actions?: ToastAction[]) => void;
   dismissToast: (id: number) => void;
   setTab: (t: TabId) => void;
@@ -117,6 +117,8 @@ interface Ctx extends AppState {
   addTask: (input: NewTaskInput) => Task | null;
   updateTask: (id: string, patch: Partial<Task>) => Task | null;
   removeTask: (id: string) => void;
+  /** Проверка слота перед записью (фикс 11): free / коллизии + варианты переноса. */
+  checkTaskSlot: (date: string, startMin: number, endMin: number, excludeId?: string) => SlotCheckResult;
   setTaskStatus: (id: string, status: TaskStatus) => void;
   applyRoutine: (r: Routine) => { time: number } | null;
 
@@ -517,25 +519,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   /* ---------- tasks ---------- */
   const addTask = useCallback((input: NewTaskInput): Task | null => {
     const u = stateRef.current.user!;
-    /* Разведение по слотам (фикс 7): одновременно — одна задача.
-     * Занятый интервал → авто-сдвиг на ближайший свободный слот + тост;
-     * нет окна до конца дня → задача не создаётся, предупреждение.
-     * Skipped-задачи не считаются занятыми: пропуск освобождает время. */
+    /* Разведение по слотам: одновременно — одна задача (фикс 7).
+     * Фикс 11: молча НЕ переносим — при коллизии задача не создаётся
+     * (null), а UI через checkTaskSlot показывает диалог с вариантами.
+     * Занято = только todo: выполненные/пропущенные слот не блокируют
+     * (единое правило с checkTaskSlot, иначе диалог предложит то, что
+     * addTask отклонит — микрофикс 12). */
     const occupied = db
       .tasksOf(u.id)
-      .filter((x) => x.date === input.date && !x.recurrenceRule && x.status !== "skipped");
-    const resolved = resolveSlot(occupied, input.startMin, input.endMin - input.startMin);
-    if (!resolved) {
-      toast("error", "Не нашёл свободного окна до конца дня — задача не создана");
-      return null;
-    }
-    const placed = resolved.moved ? { ...input, startMin: resolved.startMin, endMin: resolved.endMin } : input;
-    if (resolved.moved) toast("info", `Слот был занят — перенёс на ${minToHM(resolved.startMin)}`);
+      .filter((x) => x.date === input.date && !x.recurrenceRule && x.status === "todo");
+    if (findCollisions(occupied, input.startMin, input.endMin).length) return null;
 
     const connected = stateRef.current.sync.connected;
     const now = new Date().toISOString();
     const task: Task = {
-      id: uid(), userId: u.id, ...placed,
+      id: uid(), userId: u.id, ...input,
       status: "todo", source: "local",
       syncStatus: connected ? "pending" : "local",
       createdAt: now, updatedAt: now,
@@ -559,29 +557,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const t = db.tasksOf(u.id).find((x) => x.id === id);
     if (!t) return null;
 
-    /* Разведение по слотам (фикс 7): перенос/смена дня — авто-сдвиг при
-     * пересечении; resize — кламп до ближайшей следующей задачи. */
+    /* Разведение по слотам: одновременно — одна задача (фикс 7).
+     * Фикс 11: перенос/смена дня при коллизии молча отклоняются (null) —
+     * UI через checkTaskSlot показывает диалог с вариантами переноса.
+     * Занято = только todo (единое правило, микрофикс 12).
+     * Resize — по-прежнему кламп до ближайшей следующей задачи. */
     const dateChanged = p.date !== undefined && p.date !== t.date;
     const startChanged = p.startMin !== undefined && p.startMin !== t.startMin;
     if (dateChanged || startChanged) {
       const targetDate = p.date ?? t.date;
-      const dur = (p.endMin ?? t.endMin) - (p.startMin ?? t.startMin);
+      const startMin = p.startMin ?? t.startMin;
+      const endMin = p.endMin ?? startMin + (t.endMin - t.startMin);
       const occupied = db
         .tasksOf(u.id)
-        .filter((x) => x.date === targetDate && x.id !== id && !x.recurrenceRule && x.status !== "skipped");
-      const resolved = resolveSlot(occupied, p.startMin ?? t.startMin, dur);
-      if (!resolved) {
-        toast("error", "Не нашёл свободного окна до конца дня — перенос отменён");
-        return null;
-      }
-      if (resolved.moved) {
-        p = { ...p, startMin: resolved.startMin, endMin: resolved.startMin + dur };
-        toast("info", `Слот был занят — перенёс на ${minToHM(resolved.startMin)}`);
-      }
+        .filter((x) => x.date === targetDate && x.id !== id && !x.recurrenceRule && x.status === "todo");
+      if (findCollisions(occupied, startMin, endMin).length) return null;
     } else if (p.endMin !== undefined && p.endMin !== t.endMin) {
       const occupied = db
         .tasksOf(u.id)
-        .filter((x) => x.date === t.date && x.id !== id && !x.recurrenceRule && x.status !== "skipped" && x.startMin > t.startMin);
+        .filter((x) => x.date === t.date && x.id !== id && !x.recurrenceRule && x.status === "todo" && x.startMin > t.startMin);
       const limit = occupied.length ? Math.min(...occupied.map((x) => x.startMin)) : DAY_END;
       p = { ...p, endMin: clamp(p.endMin, t.startMin + 15, limit) };
     }
@@ -602,6 +596,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refreshFromDb(u.id);
     return next;
   }, [materializeRecurrences, mirrorRemote, refreshFromDb, toast]);
+
+  /**
+   * Проверка слота перед записью (фикс 11). Чистое чтение:
+   * free=true — можно писать; иначе colliding (для текста диалога)
+   * и proposals (ближайшие свободные окна той же длительности).
+   */
+  const checkTaskSlot = useCallback(
+    (date: string, startMin: number, endMin: number, excludeId?: string): SlotCheckResult => {
+      const u = stateRef.current.user;
+      if (!u) return { free: true, colliding: [], proposals: [] };
+      /* Занято = только НЕВЫПОЛНЕННЫЕ (todo) задачи: сделанные уже состоялись
+       * и слот не блокируют, пропущенные освобождают время (мик-рофикс 12). */
+      const occupied = db
+        .tasksOf(u.id)
+        .filter((x) => x.date === date && x.id !== excludeId && !x.recurrenceRule && x.status === "todo");
+      const colliding = findCollisions(occupied, startMin, endMin).map((t) => ({
+        id: t.id,
+        title: t.title,
+        startMin: t.startMin,
+        endMin: t.endMin,
+      }));
+      if (!colliding.length) return { free: true, colliding: [], proposals: [] };
+      /* Первичное предложение — resolveSlot (ближайший слот, вперёд или назад);
+       * затем — альтернативы из freeSlotOptions (до 3 уникальных вариантов). */
+      const dur = endMin - startMin;
+      const primary = resolveSlot(occupied, startMin, dur);
+      const proposals: { startMin: number; endMin: number }[] = [];
+      if (primary) proposals.push({ startMin: primary.startMin, endMin: primary.endMin });
+      for (const alt of freeSlotOptions(occupied, startMin, dur)) {
+        if (proposals.length >= 3) break;
+        if (!proposals.some((p) => p.startMin === alt.startMin)) proposals.push(alt);
+      }
+      return { free: false, colliding, proposals };
+    },
+    []
+  );
 
   const removeTask = useCallback((id: string) => {
     const st = stateRef.current;
@@ -990,7 +1020,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     ...state,
     toast, dismissToast, setTab: (t) => patch({ tab: t }),
     signIn, signUp, signInWith, signOut, updateUser,
-    addTask, updateTask, removeTask, setTaskStatus, applyRoutine,
+    addTask, updateTask, removeTask, checkTaskSlot, setTaskStatus, applyRoutine,
     saveMood, updateMoodLog, removeMoodLog, restoreMoodLog, openCheckIn, closeCheckIn,
     evaluatePrompts, dismissPrompt, savePromptSettings,
     consumeDeepLink, clearDeepLink, setDeepLink,

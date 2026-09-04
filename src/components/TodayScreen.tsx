@@ -5,6 +5,8 @@ import { useApp } from "../state/store";
 import { resolveColors } from "../lib/palette";
 import { bestSlots, energySeries, restWindows } from "../lib/rhythm";
 import SuggestionSurface from "../features/suggestions/presentation/SuggestionSurface";
+import SlotConflictDialog from "../features/timeline/SlotConflictDialog";
+import type { SlotCheckResult } from "../features/timeline/conflicts";
 import { setFlowLink } from "../features/flow/flowLink";
 import { useHotkeys } from "../shared/hooks/useHotkeys";
 import { latestMoodOfDay, moodLabel } from "../features/mood/domain/moodService";
@@ -60,6 +62,8 @@ export default function TodayScreen({
   const [drag, setDrag] = useState<Drag>(null);
   const dragRef = useRef<{ id: string; mode: "move" | "resize"; y0: number; s0: number; e0: number; moved: boolean } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  /* Фикс 11: диалог «это время занято» при перетаскивании */
+  const [conflict, setConflict] = useState<{ taskId: string; taskTitle: string; dur: number; check: SlotCheckResult } | null>(null);
   const [armedDelete, setArmedDelete] = useState<string | null>(null);
 
   useEffect(() => {
@@ -127,10 +131,15 @@ export default function TodayScreen({
     dragRef.current = null;
     if (!d) return;
     if (d.moved && drag) {
-      const applied = app.updateTask(d.id, { startMin: drag.startMin, endMin: drag.endMin });
-      /* если слот был занят, store уже показал тост с фактическим временем */
-      if (applied && applied.startMin === drag.startMin) {
-        app.toast("info", `«${t.title}» → ${minToHM(applied.startMin)}–${minToHM(applied.endMin)}`);
+      /* Фикс 11: при коллизии не переносим молча — открываем диалог. */
+      const check = app.checkTaskSlot(date, drag.startMin, drag.endMin, d.id);
+      if (!check.free) {
+        setConflict({ taskId: d.id, taskTitle: t.title, dur: drag.endMin - drag.startMin, check });
+      } else {
+        const applied = app.updateTask(d.id, { startMin: drag.startMin, endMin: drag.endMin });
+        if (applied) {
+          app.toast("info", `«${t.title}» → ${minToHM(applied.startMin)}–${minToHM(applied.endMin)}`);
+        }
       }
     } else if (!d.moved && d.mode === "move") {
       onEdit(t);
@@ -454,6 +463,21 @@ export default function TodayScreen({
         <HintCard />
       </aside>
       </div>
+
+      {/* Фикс 11: диалог переноса при занятом слоте (drag & drop) */}
+      <SlotConflictDialog
+        check={conflict?.check ?? null}
+        taskTitle={conflict?.taskTitle ?? ""}
+        onCancel={() => setConflict(null)}
+        onPick={(slot) => {
+          if (!conflict) return;
+          const applied = app.updateTask(conflict.taskId, { startMin: slot.startMin, endMin: slot.startMin + conflict.dur });
+          if (applied) {
+            app.toast("info", `«${conflict.taskTitle}» → ${minToHM(applied.startMin)}–${minToHM(applied.endMin)}`);
+          }
+          setConflict(null);
+        }}
+      />
     </div>
   );
 }
