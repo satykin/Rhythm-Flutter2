@@ -45,6 +45,10 @@ export default function SlotConflictDialog({
       icon="clock"
       width={460}
       testId="slot-conflict-dialog"
+      /* Блокирующая модалка (фикс 14/15): клик по фону НЕ закрывает —
+         закрывают только «Отмена» и Esc; страница не прокручивается. */
+      closeOnBackdrop={false}
+      lockScroll
       footer={
         <>
           <button className="btn btn-ghost" onClick={onCancel} data-testid="slot-conflict-cancel">
