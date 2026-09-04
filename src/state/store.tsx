@@ -226,6 +226,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     toast(kind, text);
   }, [toast]);
 
+  /**
+   * Оптимистичное обновление состояния задач (фикс 16).
+   * Собирает tasks НОВЫМ массивом из локального кэша — БЕЗ серверного
+   * чтения: оно гонит stale-данные (сервер ещё не получил наш insert)
+   * и затирает оптимистичную строку, из-за чего задача появлялась
+   * только после F5. Заодно пересчитывает подсказки (легко, с троттлом).
+   */
+  const refreshTasksLocal = useCallback((userId: string) => {
+    materializeRecurrences(userId);
+    const suggestions = runScheduler(userId);
+    patch({
+      tasks: db.tasksOf(userId).sort((a, b) => a.date.localeCompare(b.date) || a.startMin - b.startMin),
+      suggestions,
+    });
+  }, [materializeRecurrences, patch]);
+
+  /** Сервер подтвердил запись → снимаем пометку «синхронизирую». */
+  const markSynced = useCallback((userId: string, id: string) => {
+    const t = db.tasksOf(userId).find((x) => x.id === id);
+    if (!t || t.syncStatus !== "pending") return;
+    db.updateTask({ ...t, syncStatus: "synced" });
+    void db.commit();
+    refreshTasksLocal(userId);
+  }, [refreshTasksLocal]);
+
   /* Подсказки: генерация кандидатов + дедупликация по ключу.
    * Фаза 1.5b: в remote-режиме ВСЕ чтения — через DataProvider; результат
    * гидрирует локальный кэш, и нижестоящая логика (scheduler, materialize,
@@ -270,22 +295,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
    * обновлён оптимистично). Сетевая ошибка → операция в офлайн-очередь
    * + тост «синхронизирую позже»; логическая ошибка → тост сразу (не глотаем).
    */
+  /**
+   * Зеркалирование записи в Supabase (фикс 16: возвращает исход, чтобы
+   * вызывающий код мог откатить оптимистичное состояние):
+   *   "ok"     — сервер принял (идемпotent upsert, last-write-wins);
+   *   "queued" — сетевая ошибка, операция в офлайн-очереди (строка
+   *              остаётся в store с пометкой «синхронизирую»);
+   *   "error"  — логическая ошибка БД (строку надо убрать из store);
+   *   "off"    — local-режим, зеркалировать некуда.
+   */
   const mirrorRemote = useCallback((
     userId: string,
     table: QueueTable,
     kind: "upsert" | "delete",
     payload: Record<string, unknown>,
     op: () => Promise<unknown>
-  ) => {
-    if (data.kind !== "supabase") return;
-    op().catch((e) => {
-      if (isNetworkLikeError(e)) {
-        offlineQueue.push({ userId, table, kind, payload });
-        netToast("info", "Нет связи с сервером — синхронизирую позже");
-      } else {
+  ): Promise<"ok" | "queued" | "error" | "off"> => {
+    if (data.kind !== "supabase") return Promise.resolve("off");
+    return op()
+      .then(() => "ok" as const)
+      .catch((e) => {
+        if (isNetworkLikeError(e)) {
+          offlineQueue.push({ userId, table, kind, payload });
+          netToast("info", "Нет связи с сервером — синхронизирую позже");
+          return "queued" as const;
+        }
         netToast("error", e instanceof Error ? e.message : "Ошибка синхронизации");
-      }
-    });
+        return "error" as const;
+      });
   }, [netToast]);
 
   /** Повтор операции из офлайн-очереди через провайдер. */
@@ -538,19 +575,33 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       syncStatus: connected ? "pending" : "local",
       createdAt: now, updatedAt: now,
     };
-    /* Ошибки записи задачи не глотаем: показываем тост (контур фикса ошибок). */
+    /* Ошибки записи задачи не глотаем: показываем тост (контур фикса ошибок).
+     * Локальная запись не прошла — задача НЕ создаётся (фикс 16). */
     try {
       db.insertTask(task);
-      if (task.recurrenceRule) materializeRecurrences(u.id);
       void db.commit();
     } catch (e) {
       toast("error", `Не удалось сохранить задачу: ${e instanceof Error ? e.message : "неизвестная ошибка"}`);
+      return null;
     }
-    /* Фаза 1.5b: зеркалируем в Supabase (в remote-режиме); офлайн → очередь. */
-    mirrorRemote(u.id, "tasks", "upsert", task as unknown as Record<string, unknown>, () => data.tasks.upsert(task));
-    refreshFromDb(u.id);
+    /* Оптимистичное обновление (фикс 16): задача видна на таймлайне
+     * МГНОВЕННО — до ответа сервера. Клиентский uuid = PK в Supabase,
+     * поэтому «временный id → реальный» не нужен: id стабилен, при
+     * успехе лишь помечаем строку synced. */
+    refreshTasksLocal(u.id);
+    void mirrorRemote(u.id, "tasks", "upsert", task as unknown as Record<string, unknown>, () => data.tasks.upsert(task)).then((res) => {
+      if (res === "error") {
+        /* Логическая ошибка БД — убираем из store (тост показал mirrorRemote). */
+        db.removeTask(task.id);
+        void db.commit();
+        refreshTasksLocal(u.id);
+      } else if (res === "ok") {
+        markSynced(u.id, task.id);
+      }
+      /* "queued" — строка остаётся с пометкой «синхронизирую» (pending). */
+    });
     return task;
-  }, [materializeRecurrences, mirrorRemote, refreshFromDb, toast]);
+  }, [markSynced, mirrorRemote, refreshTasksLocal, toast]);
 
   const updateTask = useCallback((id: string, p: Partial<Task>): Task | null => {
     const u = stateRef.current.user!;
@@ -587,15 +638,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     };
     try {
       db.updateTask(next);
-      if (next.recurrenceRule && !next.parentTaskId) materializeRecurrences(u.id);
       void db.commit();
     } catch (e) {
       toast("error", `Не удалось обновить задачу: ${e instanceof Error ? e.message : "неизвестная ошибка"}`);
+      return null;
     }
-    mirrorRemote(u.id, "tasks", "upsert", next as unknown as Record<string, unknown>, () => data.tasks.upsert(next));
-    refreshFromDb(u.id);
+    /* Оптимистично (фикс 16): изменения видны сразу, без серверного чтения. */
+    refreshTasksLocal(u.id);
+    void mirrorRemote(u.id, "tasks", "upsert", next as unknown as Record<string, unknown>, () => data.tasks.upsert(next)).then((res) => {
+      if (res === "error") {
+        /* Откат к предыдущей версии (снапшот t). */
+        db.updateTask(t);
+        void db.commit();
+        refreshTasksLocal(u.id);
+      } else if (res === "ok") {
+        markSynced(u.id, id);
+      }
+    });
     return next;
-  }, [materializeRecurrences, mirrorRemote, refreshFromDb, toast]);
+  }, [markSynced, mirrorRemote, refreshTasksLocal, toast]);
 
   /**
    * Проверка слота перед записью (фикс 11). Чистое чтение:
@@ -637,10 +698,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const st = stateRef.current;
     const u = st.user!;
     const t = db.tasksOf(u.id).find((x) => x.id === id);
+    if (!t) return;
     try {
       db.removeTask(id);
       /* Tombstone: удалённое событие календаря не должно вернуться при следующем pull. */
-      if (t?.externalId) {
+      if (t.externalId) {
         const removed = st.sync.removedExternalIds ?? [];
         if (!removed.includes(t.externalId)) {
           const sync = { ...st.sync, removedExternalIds: [...removed, t.externalId] };
@@ -651,10 +713,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       void db.commit();
     } catch (e) {
       toast("error", `Не удалось удалить задачу: ${e instanceof Error ? e.message : "неизвестная ошибка"}`);
+      return;
     }
-    mirrorRemote(u.id, "tasks", "delete", { id }, () => data.tasks.remove(u.id, id));
-    refreshFromDb(u.id);
-  }, [mirrorRemote, patch, persistSync, refreshFromDb, toast]);
+    /* Оптимистично (фикс 16): строка исчезает с таймлайна сразу. */
+    refreshTasksLocal(u.id);
+    void mirrorRemote(u.id, "tasks", "delete", { id }, () => data.tasks.remove(u.id, id)).then((res) => {
+      if (res === "error") {
+        /* Откат: возвращаем задачу в store. */
+        db.insertTask(t);
+        void db.commit();
+        refreshTasksLocal(u.id);
+      }
+    });
+  }, [mirrorRemote, patch, persistSync, refreshTasksLocal, toast]);
 
   const setTaskStatus = useCallback((id: string, status: TaskStatus) => {
     updateTask(id, { status });
