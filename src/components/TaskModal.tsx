@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { I, iconOf } from "./icons";
 import { Field, Modal, Seg } from "./ui";
 import { useApp } from "../state/store";
+import SlotConflictDialog from "../features/timeline/SlotConflictDialog";
+import type { SlotCheckResult } from "../features/timeline/conflicts";
 import { COLOR_NAMES, TASK_COLORS, TASK_ICONS } from "../lib/palette";
 import { RECURRENCE_PRESETS } from "../features/timeline/recurrence";
 import { durationHint, bestTimeHint } from "../features/suggestions/domain/SuggestionEngine";
@@ -43,6 +45,8 @@ export default function TaskModal({
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [armed, setArmed] = useState(false);
   const [recurrence, setRecurrence] = useState("");
+  /* Фикс 11: диалог «это время занято» */
+  const [conflict, setConflict] = useState<SlotCheckResult | null>(null);
 
   /* §5 инлайн-подсказки: оценка длительности + лучшее время (по тегам/энергии) */
   const smartDuration = useMemo(
@@ -62,6 +66,7 @@ export default function TaskModal({
     setArmed(false);
     setTagInput("");
     setRecurrence(task?.recurrenceRule ?? "");
+    setConflict(null);
     if (task) {
       setTitle(task.title);
       setDescription(task.description);
@@ -145,15 +150,14 @@ export default function TaskModal({
     return e;
   }, [title, date, start, end]);
 
-  const save = () => {
-    setErrs(valid);
-    if (Object.keys(valid).length) return;
+  /** Запись с конкретным временем (вызывается напрямую и из диалога переноса). */
+  const commit = (s: number, e: number) => {
     const payload = {
       title: title.trim(),
       description: description.trim(),
       date,
-      startMin: start,
-      endMin: end,
+      startMin: s,
+      endMin: e,
       color,
       icon,
       energy,
@@ -162,18 +166,31 @@ export default function TaskModal({
     };
     if (task) {
       const applied = app.updateTask(task.id, payload);
-      if (!applied) return; // нет свободного окна — store показал предупреждение
+      if (!applied) return;
       app.toast("success", `«${payload.title}» обновлена`);
       onClose();
     } else {
       const created = app.addTask(payload);
-      if (!created) return; // нет свободного окна — store показал предупреждение, модалка остаётся
+      if (!created) return;
       app.toast("success", `«${payload.title}» в плане на ${minToHM(created.startMin)}`);
       onClose();
     }
   };
 
+  const save = () => {
+    setErrs(valid);
+    if (Object.keys(valid).length) return;
+    /* Фикс 11: при коллизии не пишем — открываем диалог с вариантами. */
+    const check = app.checkTaskSlot(date, start, end, task?.id);
+    if (!check.free) {
+      setConflict(check);
+      return;
+    }
+    commit(start, end);
+  };
+
   return (
+    <>
     <Modal open={open} onClose={onClose} title={task ? "Редактировать задачу" : "Новая задача"} icon={task ? "edit" : "plus"} width={600}>
       <div className="space-y-4">
         {task?.source === "gcal" && (
@@ -413,5 +430,19 @@ export default function TaskModal({
         </div>
       </div>
     </Modal>
+
+    {/* Фикс 11: диалог переноса при занятом слоте */}
+    <SlotConflictDialog
+      check={conflict}
+      taskTitle={title.trim()}
+      onCancel={() => setConflict(null)}
+      onPick={(slot) => {
+        setStart(slot.startMin);
+        setEnd(slot.endMin);
+        setConflict(null);
+        commit(slot.startMin, slot.endMin);
+      }}
+    />
+    </>
   );
 }
