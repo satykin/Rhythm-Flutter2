@@ -127,7 +127,10 @@ export function seedFor(user: User): {
     { title: "Утренняя разминка", icon: "sun", color: "amber", start: 450, dur: 30, energy: "medium", tags: ["здоровье"] },
     { title: "Deep Work: ключевой проект", icon: "briefcase", color: "violet", start: 540, dur: 90, energy: "high", tags: ["работа", "deep work"] },
     { title: "Созвон с командой", icon: "users", color: "indigo", start: 660, dur: 45, energy: "medium", tags: ["работа"] },
-    { title: "Обед и прогулка", icon: "coffee", color: "aqua", start: 750, dur: 60, energy: "low", tags: ["отдых"] },
+    /* Обед 12:00–13:00: заканчивается до 13:20, чтобы окно 800–860 в тестах
+       не зависело от времени прогона (обед никогда не пересекает его ни в
+       каком статусе). Не пересекает «Созвон» (до 705) и «Дизайн-ревью» (с 870). */
+    { title: "Обед и прогулка", icon: "coffee", color: "aqua", start: 720, dur: 60, energy: "low", tags: ["отдых"] },
     { title: "Дизайн-ревью", icon: "layers", color: "rose", start: 870, dur: 60, energy: "medium", tags: ["работа"] },
     { title: "Тренировка", icon: "dumbbell", color: "lime", start: 990, dur: 60, energy: "high", tags: ["здоровье"] },
     { title: "Чтение", icon: "book", color: "sky", start: 1170, dur: 45, energy: "low", tags: ["рост"] },
