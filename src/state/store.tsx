@@ -522,10 +522,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     /* Разведение по слотам: одновременно — одна задача (фикс 7).
      * Фикс 11: молча НЕ переносим — при коллизии задача не создаётся
      * (null), а UI через checkTaskSlot показывает диалог с вариантами.
-     * Skipped-задачи не считаются занятыми: пропуск освобождает время. */
+     * Занято = только todo: выполненные/пропущенные слот не блокируют
+     * (единое правило с checkTaskSlot, иначе диалог предложит то, что
+     * addTask отклонит — микрофикс 12). */
     const occupied = db
       .tasksOf(u.id)
-      .filter((x) => x.date === input.date && !x.recurrenceRule && x.status !== "skipped");
+      .filter((x) => x.date === input.date && !x.recurrenceRule && x.status === "todo");
     if (findCollisions(occupied, input.startMin, input.endMin).length) return null;
 
     const connected = stateRef.current.sync.connected;
@@ -558,6 +560,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     /* Разведение по слотам: одновременно — одна задача (фикс 7).
      * Фикс 11: перенос/смена дня при коллизии молча отклоняются (null) —
      * UI через checkTaskSlot показывает диалог с вариантами переноса.
+     * Занято = только todo (единое правило, микрофикс 12).
      * Resize — по-прежнему кламп до ближайшей следующей задачи. */
     const dateChanged = p.date !== undefined && p.date !== t.date;
     const startChanged = p.startMin !== undefined && p.startMin !== t.startMin;
@@ -567,12 +570,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const endMin = p.endMin ?? startMin + (t.endMin - t.startMin);
       const occupied = db
         .tasksOf(u.id)
-        .filter((x) => x.date === targetDate && x.id !== id && !x.recurrenceRule && x.status !== "skipped");
+        .filter((x) => x.date === targetDate && x.id !== id && !x.recurrenceRule && x.status === "todo");
       if (findCollisions(occupied, startMin, endMin).length) return null;
     } else if (p.endMin !== undefined && p.endMin !== t.endMin) {
       const occupied = db
         .tasksOf(u.id)
-        .filter((x) => x.date === t.date && x.id !== id && !x.recurrenceRule && x.status !== "skipped" && x.startMin > t.startMin);
+        .filter((x) => x.date === t.date && x.id !== id && !x.recurrenceRule && x.status === "todo" && x.startMin > t.startMin);
       const limit = occupied.length ? Math.min(...occupied.map((x) => x.startMin)) : DAY_END;
       p = { ...p, endMin: clamp(p.endMin, t.startMin + 15, limit) };
     }
@@ -603,9 +606,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     (date: string, startMin: number, endMin: number, excludeId?: string): SlotCheckResult => {
       const u = stateRef.current.user;
       if (!u) return { free: true, colliding: [], proposals: [] };
+      /* Занято = только НЕВЫПОЛНЕННЫЕ (todo) задачи: сделанные уже состоялись
+       * и слот не блокируют, пропущенные освобождают время (мик-рофикс 12). */
       const occupied = db
         .tasksOf(u.id)
-        .filter((x) => x.date === date && x.id !== excludeId && !x.recurrenceRule && x.status !== "skipped");
+        .filter((x) => x.date === date && x.id !== excludeId && !x.recurrenceRule && x.status === "todo");
       const colliding = findCollisions(occupied, startMin, endMin).map((t) => ({
         id: t.id,
         title: t.title,
